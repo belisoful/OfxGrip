@@ -95,7 +95,7 @@ std::string Value::toString() const
 	case ValueKind::String:
 		out << '"' << as<std::string>() << '"';
 		break;
-	case ValueKind::Bytes:
+	case ValueKind::Blob:
 		out << "<" << as<Bytes>().size() << " bytes>";
 		break;
 	}
@@ -123,7 +123,7 @@ std::string_view toString(ValueKind kind) noexcept
 		return "rgba";
 	case ValueKind::String:
 		return "string";
-	case ValueKind::Bytes:
+	case ValueKind::Blob:
 		return "bytes";
 	}
 	return "empty";

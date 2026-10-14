@@ -172,7 +172,7 @@ void writeValue(Writer& w, const Value& v)
 	case ValueKind::String:
 		w.str(v.as<std::string>());
 		break;
-	case ValueKind::Bytes:
+	case ValueKind::Blob:
 		w.bytes(v.as<Bytes>());
 		break;
 	}
@@ -252,7 +252,7 @@ bool readValue(Reader& r, Value& out)
 		out = Value(std::move(s));
 		return true;
 	}
-	case ValueKind::Bytes: {
+	case ValueKind::Blob: {
 		Bytes b;
 		if (!r.bytes(b)) {
 			return false;

@@ -17,7 +17,7 @@ TEST(Value, KindsFollowTheVariantOrder)
 	EXPECT_EQ(Value(RGB{1, 0, 0}).kind(), ValueKind::RGB);
 	EXPECT_EQ(Value(RGBA{1, 0, 0, 1}).kind(), ValueKind::RGBA);
 	EXPECT_EQ(Value("text").kind(), ValueKind::String);
-	EXPECT_EQ(Value(Bytes{1, 2}).kind(), ValueKind::Bytes);
+	EXPECT_EQ(Value(Bytes{1, 2}).kind(), ValueKind::Blob);
 }
 
 TEST(Value, NumericConversions)

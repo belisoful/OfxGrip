@@ -99,7 +99,7 @@ Json writeValue(const Value& v)
 		return Json{{"r", v.as<RGBA>().r}, {"g", v.as<RGBA>().g}, {"b", v.as<RGBA>().b}, {"a", v.as<RGBA>().a}};
 	case ValueKind::String:
 		return v.as<std::string>();
-	case ValueKind::Bytes:
+	case ValueKind::Blob:
 		return Json::binary(v.as<Bytes>());
 	}
 	return nullptr;

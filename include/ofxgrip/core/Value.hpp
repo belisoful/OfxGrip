@@ -36,7 +36,7 @@ enum class ValueKind : std::uint8_t {
 	RGB = 6,
 	RGBA = 7,
 	String = 8,
-	Bytes = 9,
+	Blob = 9,   /*!< A `Bytes` value. The case is not named `Bytes` because GCC's -Wshadow objects. */
 };
 
 /*! A parameter value. */
