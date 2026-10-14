@@ -1,80 +1,186 @@
 {
   "version": 5,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     },
-    { "name": "debug", "inherits": "base", "displayName": "Debug (native)" },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug (native)"
+    },
     {
       "name": "release",
       "inherits": "base",
       "displayName": "Release (universal on macOS)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
     },
     {
       "name": "release-universal",
       "inherits": "release",
       "displayName": "Release (arm64 + x86_64)",
-      "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64" },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
     },
     {
       "name": "x86_64",
       "inherits": "base",
       "displayName": "Debug (x86_64 slice, Rosetta)",
-      "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "x86_64" },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "x86_64"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
     },
     {
       "name": "asan-ubsan",
       "inherits": "base",
       "displayName": "Debug + AddressSanitizer + UndefinedBehaviorSanitizer",
-      "cacheVariables": { "OFXGRIP_SANITIZER": "address;undefined" }
+      "cacheVariables": {
+        "OFXGRIP_SANITIZER": "address;undefined"
+      }
     },
     {
       "name": "tsan",
       "inherits": "base",
       "displayName": "Debug + ThreadSanitizer",
-      "cacheVariables": { "OFXGRIP_SANITIZER": "thread" }
+      "cacheVariables": {
+        "OFXGRIP_SANITIZER": "thread"
+      }
     },
     {
       "name": "coverage",
       "inherits": "base",
       "displayName": "Debug + coverage",
-      "cacheVariables": { "OFXGRIP_COVERAGE": "ON" }
+      "cacheVariables": {
+        "OFXGRIP_COVERAGE": "ON"
+      }
     },
     {
       "name": "windows",
-      "displayName": "Windows x64 (Visual Studio 2022)",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
+      "displayName": "Windows x64 (Ninja, inside a Visual Studio developer prompt)",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "debug", "configurePreset": "debug" },
-    { "name": "release", "configurePreset": "release" },
-    { "name": "release-universal", "configurePreset": "release-universal" },
-    { "name": "x86_64", "configurePreset": "x86_64" },
-    { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
-    { "name": "tsan", "configurePreset": "tsan" },
-    { "name": "coverage", "configurePreset": "coverage" },
-    { "name": "windows", "configurePreset": "windows", "configuration": "Debug" }
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "release-universal",
+      "configurePreset": "release-universal"
+    },
+    {
+      "name": "x86_64",
+      "configurePreset": "x86_64"
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows"
+    }
   ],
   "testPresets": [
-    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
-    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
-    { "name": "x86_64", "configurePreset": "x86_64", "output": { "outputOnFailure": true } },
-    { "name": "asan-ubsan", "configurePreset": "asan-ubsan", "output": { "outputOnFailure": true } },
-    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } },
-    { "name": "coverage", "configurePreset": "coverage", "output": { "outputOnFailure": true } },
-    { "name": "windows", "configurePreset": "windows", "configuration": "Debug", "output": { "outputOnFailure": true } }
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "x86_64",
+      "configurePreset": "x86_64",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
   ]
 }
