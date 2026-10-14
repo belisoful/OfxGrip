@@ -1,0 +1,20 @@
+# Build output
+build/
+out/
+*.profraw
+*.profdata
+coverage/
+
+# Reference clones and personal files
+local/
+Local/
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+xcuserdata/
+
+# Session temp
+_to_delete/
