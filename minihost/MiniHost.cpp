@@ -68,7 +68,7 @@ private:
 /*! An effect descriptor or instance. */
 class EffectObject {
 public:
-	EffectObject(MiniHost& host, bool instance) : host_(host), instance_(instance), params_(std::make_unique<ParamSet>()) {}
+	EffectObject(MiniHost& host, bool isInstance) : host_(host), instance_(isInstance), params_(std::make_unique<ParamSet>()) {}
 	PropSet& props() noexcept { return props_; }
 	ParamSet& params() noexcept { return *params_; }
 	void setParams(std::unique_ptr<ParamSet> p) { params_ = std::move(p); }
