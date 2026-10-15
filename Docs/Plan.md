@@ -94,7 +94,7 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 
 ### Phase 4: Windows and Linux
 
-- CMake toolchains, MSVC and GCC builds, `Win64` and `Linux-x86-64` bundle folders, Authenticode and old-glibc builds, CI runners. Live hosts are an open question (no Windows or Linux machine is known).
+- CMake toolchains, MSVC and GCC builds, the `Win64`, `Win-arm64ec`, `Linux-x86-64`, and `Linux-aarch64` bundle folders, Authenticode and old-glibc builds, CI runners. Windows on Arm means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL; no OpenFX host ships for Arm Linux yet. Live hosts are an open question (no Windows or Linux machine is known).
 - Inference through InferKit's C API or a Wraz server.
 
 ## 4. Layout

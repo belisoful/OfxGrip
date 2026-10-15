@@ -27,19 +27,23 @@ else()
   set(_cargo_profile_dir debug)
 endif()
 
+# The same architecture folder as the C++ plug-ins (see ofxgrip_bundle_arch_dir). On Windows on
+# Arm the cdylib must be an ARM64EC build to match Win-arm64ec; cargo's target for that is
+# arm64ec-pc-windows-msvc, passed through OFXGRIP_RUST_TARGET.
+ofxgrip_bundle_arch_dir(_arch_dir)
+set(OFXGRIP_RUST_TARGET "" CACHE STRING "A cargo --target triple for the Rust bundle; empty builds for the host")
+set(_cargo_target_flag)
+set(_cargo_out_dir "${_rust_target_dir}/${_cargo_profile_dir}")
+if(OFXGRIP_RUST_TARGET)
+  set(_cargo_target_flag --target "${OFXGRIP_RUST_TARGET}")
+  set(_cargo_out_dir "${_rust_target_dir}/${OFXGRIP_RUST_TARGET}/${_cargo_profile_dir}")
+endif()
 if(APPLE)
-  set(_cdylib "${_rust_target_dir}/${_cargo_profile_dir}/libOfxGripGainRs.dylib")
-  set(_arch_dir "MacOS")
+  set(_cdylib "${_cargo_out_dir}/libOfxGripGainRs.dylib")
 elseif(WIN32)
-  set(_cdylib "${_rust_target_dir}/${_cargo_profile_dir}/OfxGripGainRs.dll")
-  set(_arch_dir "Win64")
+  set(_cdylib "${_cargo_out_dir}/OfxGripGainRs.dll")
 else()
-  set(_cdylib "${_rust_target_dir}/${_cargo_profile_dir}/libOfxGripGainRs.so")
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-    set(_arch_dir "Linux-aarch64")
-  else()
-    set(_arch_dir "Linux-x86-64")
-  endif()
+  set(_cdylib "${_cargo_out_dir}/libOfxGripGainRs.so")
 endif()
 
 set(OFXGRIP_RUST_BUNDLE_DIR "${CMAKE_BINARY_DIR}/plugins/GainRs/OfxGripGainRs.ofx.bundle")
@@ -48,7 +52,7 @@ set(_rust_binary "${OFXGRIP_RUST_BUNDLE_DIR}/Contents/${_arch_dir}/OfxGripGainRs
 add_custom_command(
   OUTPUT "${_cdylib}"
   COMMAND ${CMAKE_COMMAND} -E env "${_cargo_env}" "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}"
-          "${OFXGRIP_CARGO}" build ${_cargo_profile_flag} --manifest-path "${_rust_root}/Cargo.toml" --workspace
+          "${OFXGRIP_CARGO}" build ${_cargo_profile_flag} ${_cargo_target_flag} --manifest-path "${_rust_root}/Cargo.toml" --workspace
   DEPENDS ofxgrip_c ofxgrip ofxgrip_core
   WORKING_DIRECTORY "${_rust_root}"
   COMMENT "cargo build (OfxGrip Rust workspace)"

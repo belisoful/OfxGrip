@@ -8,8 +8,43 @@
 # The target is a MODULE library named <NAME>.ofx placed in the OpenFX bundle layout:
 #   <build>/plugins/<NAME>/<NAME>.ofx.bundle/Contents/<Arch>/<NAME>.ofx
 #   <build>/plugins/<NAME>/<NAME>.ofx.bundle/Contents/Info.plist   (macOS)
-# <Arch> is MacOS, Win64, Linux-x86-64, or Linux-aarch64 (ofxPackaging.rst). Resolve on Windows
-# ARM64 also scans Win-arm64x and Win-arm64ec; those are produced by a native ARM64 build.
+# <Arch> comes from ofxgrip_bundle_arch_dir below.
+
+# ofxgrip_bundle_arch_dir(<out-var>): the architecture folder of the OpenFX bundle layout for
+# the current target (ofxPackaging.rst): MacOS (one universal binary), Win64, Linux-x86-64, or
+# Linux-aarch64. On Windows on Arm, Resolve's host is an ARM64EC process that scans
+# Win-arm64x, then Win-arm64ec, then Win64; it never scans Win-arm64, and it cannot load a plain
+# ARM64 DLL. An ARM64EC build (`cmake -A ARM64EC`) therefore lands in Win-arm64ec; a plain ARM64
+# build lands in Win-arm64 with a warning. OFXGRIP_WINDOWS_ARCH_DIR overrides the Windows choice,
+# for example Win-arm64x for a binary linked as ARM64X.
+set(OFXGRIP_WINDOWS_ARCH_DIR "" CACHE STRING "The Windows architecture folder of built bundles; empty derives it from the target")
+
+function(ofxgrip_bundle_arch_dir out_var)
+  if(APPLE)
+    set(${out_var} "MacOS" PARENT_SCOPE)
+    return()
+  endif()
+  if(WIN32)
+    if(OFXGRIP_WINDOWS_ARCH_DIR)
+      set(${out_var} "${OFXGRIP_WINDOWS_ARCH_DIR}" PARENT_SCOPE)
+      return()
+    endif()
+    if(CMAKE_GENERATOR_PLATFORM MATCHES "^(ARM64EC|arm64ec)$" OR CMAKE_CXX_FLAGS MATCHES "/arm64EC" OR CMAKE_C_FLAGS MATCHES "/arm64EC")
+      set(${out_var} "Win-arm64ec" PARENT_SCOPE)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64|arm64")
+      message(WARNING "A plain ARM64 Windows build lands in Win-arm64, which DaVinci Resolve does not scan; build with `cmake -A ARM64EC` for Win-arm64ec, or set OFXGRIP_WINDOWS_ARCH_DIR")
+      set(${out_var} "Win-arm64" PARENT_SCOPE)
+    else()
+      set(${out_var} "Win64" PARENT_SCOPE)
+    endif()
+    return()
+  endif()
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(${out_var} "Linux-aarch64" PARENT_SCOPE)
+  else()
+    set(${out_var} "Linux-x86-64" PARENT_SCOPE)
+  endif()
+endfunction()
 
 function(ofxgrip_add_plugin)
   set(options)
@@ -20,21 +55,7 @@ function(ofxgrip_add_plugin)
     message(FATAL_ERROR "ofxgrip_add_plugin needs NAME and IDENTIFIER")
   endif()
 
-  if(APPLE)
-    set(_arch_dir "MacOS")
-  elseif(WIN32)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-      set(_arch_dir "Win-arm64")
-    else()
-      set(_arch_dir "Win64")
-    endif()
-  else()
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-      set(_arch_dir "Linux-aarch64")
-    else()
-      set(_arch_dir "Linux-x86-64")
-    endif()
-  endif()
+  ofxgrip_bundle_arch_dir(_arch_dir)
 
   set(_bundle_dir "${CMAKE_CURRENT_BINARY_DIR}/${OGP_NAME}.ofx.bundle")
   set(_target "ofxgrip_plugin_${OGP_NAME}")
