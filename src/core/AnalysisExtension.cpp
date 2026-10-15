@@ -4,6 +4,8 @@
 
 #include <ofxgrip/core/Preset.hpp>
 
+#include <cmath>
+
 OFXGRIP_NAMESPACE_BEGIN
 
 int AnalysisExtension::priority(EventId id) const

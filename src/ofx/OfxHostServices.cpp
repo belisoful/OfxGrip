@@ -10,7 +10,9 @@
 #include "ofxParam.h"
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <shellapi.h>
 #else
@@ -955,6 +957,7 @@ bool OfxHostServices::Impl::Paths::launch(const std::string& target, bool isPath
 		return false;
 	}
 #if defined(_WIN32)
+	(void)isPath;  // ShellExecute opens a folder and a URL the same way.
 	const std::wstring wide(target.begin(), target.end());
 	return reinterpret_cast<std::intptr_t>(ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
 #else
