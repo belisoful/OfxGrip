@@ -108,3 +108,54 @@ TEST(ManifestJson, AcceptsFxGripStyleKeys)
 	EXPECT_EQ(m.parameters[0].displayMaximum[0], 9.0);
 	EXPECT_EQ(m.parameters[0].options.size(), 2u);
 }
+
+TEST(ManifestJson, TargetPresetsRoundTrip)
+{
+	const char* json = R"({
+	  "effect": { "ofxId": "com.example.tp", "name": "TP", "version": "1.0.0" },
+	  "parameters": [
+	    { "id": 1, "key": "mode", "type": "choice", "options": ["soft", "hard"],
+	      "targetPresets": {
+	        "soft": { "values": { "amount": 0.75 }, "flags": { "edge": ["+hidden", "-disabled"], "amount": "-hidden" }, "tags": { "edge": ["a", "b"] },
+	                  "meta": { "edge": { "unit": "px" } }, "labels": { "amount": "Feather" } },
+	        "hard": { "labels": { "amount": "Amount" } } } },
+	    { "id": 2, "key": "amount", "type": "float", "default": 1, "range": [0, 1] },
+	    { "id": 3, "key": "edge", "type": "float", "default": 1, "range": [0, 1], "enabledWhen": "mode == 'hard'" }
+	  ]
+	})";
+	EffectManifest m;
+	Error e = parseManifestJson(json, m);
+	ASSERT_TRUE(e.ok()) << e.describe();
+	ASSERT_TRUE(m.validate().ok()) << m.validate().describe();
+	const ParameterSpec& mode = m.parameters[0];
+	ASSERT_EQ(mode.targetPresets.size(), 2u);
+	const TargetPreset& soft = mode.targetPresets.at("soft");
+	EXPECT_DOUBLE_EQ(soft.values.at("amount").toDouble(), 0.75);
+	EXPECT_EQ(soft.flags.at("edge"), (std::vector<std::string>{"+hidden", "-disabled"}));
+	EXPECT_EQ(soft.flags.at("amount"), std::vector<std::string>{"-hidden"});
+	EXPECT_EQ(soft.tags.at("edge"), (std::vector<std::string>{"a", "b"}));
+	EXPECT_EQ(soft.meta.at("edge").at("unit").as<std::string>(), "px");
+	EXPECT_EQ(soft.labels.at("amount"), "Feather");
+	EXPECT_FALSE(soft.empty());
+	EXPECT_TRUE(TargetPreset{}.empty());
+	EXPECT_EQ(m.parameters[2].enabledWhen, "mode == 'hard'");
+
+	EffectManifest back;
+	ASSERT_TRUE(parseManifestJson(writeManifestJson(m), back).ok());
+	EXPECT_EQ(back.parameters[0].targetPresets, mode.targetPresets);
+	EXPECT_EQ(back.parameters[2].enabledWhen, "mode == 'hard'");
+
+	for (const char* bad : {
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":[]}]})",
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":{"x":1}}]})",
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":{"x":{"values":{"k":{"bad":1}}}}}]})",
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":{"x":{"flags":{"k":[1]}}}}]})",
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":{"x":{"tags":{"k":1}}}}]})",
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":{"x":{"meta":{"k":1}}}}]})",
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":{"x":{"meta":{"k":{"n":{"bad":1}}}}}}]})",
+	         R"({"effect":{"ofxId":"a","name":"a"},"parameters":[{"id":1,"key":"m","type":"choice","targetPresets":{"x":{"labels":{"k":1}}}}]})",
+	     }) {
+		EffectManifest out;
+		EXPECT_FALSE(parseManifestJson(bad, out).ok()) << bad;
+	}
+}

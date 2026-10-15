@@ -173,6 +173,9 @@
       "configurePreset": "coverage",
       "output": {
         "outputOnFailure": true
+      },
+      "environment": {
+        "LLVM_PROFILE_FILE": "${sourceDir}/build/coverage/profiles/%p-%m.profraw"
       }
     },
     {

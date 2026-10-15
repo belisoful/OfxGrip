@@ -2,6 +2,8 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/core/Manifest.hpp>
 
+#include <ofxgrip/core/Rules.hpp>
+
 #include <array>
 #include <functional>
 #include <utility>
@@ -32,7 +34,7 @@ constexpr std::array<std::pair<ParameterType, std::string_view>, 37> kTypeNames{
 	{ParameterType::Toggle, "toggle"},
 	{ParameterType::Group, "group"},
 	{ParameterType::Point3D, "point3d"},
-	{ParameterType::Bytes, "bytes"},
+	{ParameterType::Blob, "bytes"},
 	{ParameterType::Section, "section"},
 	{ParameterType::Random, "random"},
 	{ParameterType::Capsule, "capsule"},
@@ -363,6 +365,18 @@ ParameterSpec& ParameterSpec::withHost(std::string host, HostOverride override)
 	return *this;
 }
 
+ParameterSpec& ParameterSpec::withTargetPreset(std::string option, TargetPreset preset)
+{
+	targetPresets[std::move(option)] = std::move(preset);
+	return *this;
+}
+
+ParameterSpec& ParameterSpec::withResetValue(Value value)
+{
+	resetValue = std::move(value);
+	return *this;
+}
+
 Error EffectManifest::validate() const
 {
 	auto fail = [](std::string message, const ParameterSpec* spec) {
@@ -463,6 +477,64 @@ Error EffectManifest::validate() const
 			for (std::size_t i = 0; i < spec.minimum.size() && i < spec.maximum.size(); ++i) {
 				if (spec.minimum[i] > spec.maximum[i]) {
 					return fail("The minimum exceeds the maximum", &spec);
+				}
+			}
+		}
+	}
+	for (const ParameterSpec& spec : flat) {
+		Rule rule;
+		if (Error e = Rule::parse(spec.visibleWhen, rule)) {
+			return fail("The visibleWhen rule does not parse: " + e.developerMessage(), &spec);
+		}
+		for (const std::string& ref : rule.references()) {
+			if (keys.count(ref) == 0) {
+				return fail("The visibleWhen rule names an undeclared parameter " + ref, &spec);
+			}
+		}
+		if (Error e = Rule::parse(spec.enabledWhen, rule)) {
+			return fail("The enabledWhen rule does not parse: " + e.developerMessage(), &spec);
+		}
+		for (const std::string& ref : rule.references()) {
+			if (keys.count(ref) == 0) {
+				return fail("The enabledWhen rule names an undeclared parameter " + ref, &spec);
+			}
+		}
+		if (spec.targetPresets.empty()) {
+			continue;
+		}
+		const bool choice = spec.type == ParameterType::Menu || spec.type == ParameterType::Presets;
+		const bool toggle = spec.type == ParameterType::Toggle || spec.type == ParameterType::Switch;
+		if (!choice && !toggle) {
+			return fail("Only a choice or a toggle carries target presets", &spec);
+		}
+		for (const auto& [option, preset] : spec.targetPresets) {
+			if (choice && spec.optionIndex(option) < 0) {
+				return fail("A target preset names an unknown option " + option, &spec);
+			}
+			if (toggle && option != "true" && option != "false") {
+				return fail("A toggle's target presets are keyed by \"true\" and \"false\"", &spec);
+			}
+			auto checkKeys = [&](const auto& section) -> const std::string* {
+				for (const auto& [key, unused] : section) {
+					(void)unused;
+					if (keys.count(key) == 0) {
+						return &key;
+					}
+				}
+				return nullptr;
+			};
+			const std::string* bad = checkKeys(preset.values);
+			bad = bad != nullptr ? bad : checkKeys(preset.flags);
+			bad = bad != nullptr ? bad : checkKeys(preset.tags);
+			bad = bad != nullptr ? bad : checkKeys(preset.meta);
+			bad = bad != nullptr ? bad : checkKeys(preset.labels);
+			if (bad != nullptr) {
+				return fail("A target preset names an undeclared parameter " + *bad, &spec);
+			}
+			for (const auto& [key, edits] : preset.flags) {
+				const ParsedFlags parsed = parseFlags(edits);
+				if (!parsed.unknown.empty()) {
+					return fail("A target preset uses an unknown flag " + parsed.unknown.front(), &spec);
 				}
 			}
 		}

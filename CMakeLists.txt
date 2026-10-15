@@ -16,7 +16,7 @@ option(OFXGRIP_BUILD_MINIHOST "Build the headless mini host" ON)
 option(OFXGRIP_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(OFXGRIP_COVERAGE "Instrument for source-based coverage (clang)" OFF)
 set(OFXGRIP_SANITIZER "" CACHE STRING "Sanitizers to enable: address, thread, undefined (semicolon separated)")
-set(OFXGRIP_COVERAGE_MIN "80" CACHE STRING "Minimum line coverage percentage the coverage script enforces")
+set(OFXGRIP_COVERAGE_MIN "85" CACHE STRING "Minimum line coverage percentage the coverage script enforces")
 set(OFXGRIP_CODESIGN_IDENTITY "" CACHE STRING "codesign identity for bundles on macOS; empty signs ad hoc")
 
 set(CMAKE_CXX_STANDARD 20)

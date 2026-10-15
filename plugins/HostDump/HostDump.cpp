@@ -12,6 +12,10 @@
 	Registry step 1 of the verification plan runs this plug-in on Resolve 21.1.1 free.
 */
 #include <ofxgrip/ofx/Plugin.hpp>
+
+#if defined(OFXGRIP_HAS_METAL)
+#include <ofxgrip/gpu/MetalBackend.hpp>
+#endif
 #include <ofxgrip/ofx/ResolveExtensions.hpp>
 
 #include "ofxImageEffect.h"
@@ -49,8 +53,11 @@ EffectManifest makeManifest()
 	m.identity.description = "Records the host's capabilities and behavior to the OfxGrip log. Passes the image through.";
 	m.identity.kind = EffectKind::Filter;
 	m.identity.extraContexts = {EffectKind::General, EffectKind::Generator};
-	m.version = Version{1, 0, 0};
+	m.version = Version{1, 1, 0};
 	m.capabilities.depths = {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float};
+#if defined(OFXGRIP_HAS_METAL)
+	m.capabilities.metalRender = true;
+#endif
 
 	// One of each kind, with and without ranges, so Q-RESOLVE-004 and Q-RESOLVE-015 can be read
 	// back from the instance.
@@ -155,7 +162,7 @@ public:
 			services().log().debug(out.str());
 		}
 		if (context.outputIsGpu()) {
-			return Error::make(ErrorCode::Unsupported, "GPU render is not available in this phase");
+			return renderGpu(context);
 		}
 		const InputImage* source = context.source();
 		if (source != nullptr && source->connected && source->view.desc.depth == o.desc.depth && source->view.desc.components == o.desc.components) {
@@ -166,6 +173,40 @@ public:
 	}
 
 private:
+	/*! A GPU render: on Metal, logs the device and copies the source frame to the output with a
+	    blit (or clears it), so the probe exercises the host's GPU path without a kernel. */
+	Error renderGpu(RenderContext& context)
+	{
+#if defined(OFXGRIP_HAS_METAL)
+		if (context.outputGpu.api == GpuApi::Metal) {
+			std::shared_ptr<metal::MetalContext> backend = metal::MetalContext::forQueue(context.outputGpu.queue);
+			if (!backend) {
+				return Error::make(ErrorCode::MissingHostFeature, "The host passed no Metal command queue");
+			}
+			if (!gpuLogged_) {
+				services().log().info("metal device=" + backend->deviceName() + " queue=" + std::to_string(reinterpret_cast<std::uintptr_t>(context.outputGpu.queue)) + " needsIntermediateCopy="
+				                      + std::to_string(context.outputGpu.needsIntermediateCopy));
+				gpuLogged_ = true;
+			}
+			const GpuImage& out = context.outputGpu;
+			const std::size_t outBytes = static_cast<std::size_t>(out.rowBytes) * static_cast<std::size_t>(out.desc.bounds.height());
+			metal::MetalCommandBuffer command = backend->commandBuffer();
+			if (!command.valid()) {
+				return Error::make(ErrorCode::Render, "No Metal command buffer is available");
+			}
+			const InputImage* source = context.source();
+			const bool sameLayout = source != nullptr && source->connected && source->gpu.handle != nullptr && source->gpu.desc.bounds == out.desc.bounds && source->gpu.rowBytes == out.rowBytes
+			                        && source->gpu.desc.depth == out.desc.depth && source->gpu.desc.components == out.desc.components;
+			Error e = sameLayout ? command.copy(source->gpu.handle, 0, out.handle, 0, outBytes) : command.fill(out.handle, 0, outBytes, 0);
+			if (e) {
+				return e;
+			}
+			return command.commit();
+		}
+#endif
+		return Error::make(ErrorCode::Unsupported, "This GPU API is not supported").with("api", std::string(toString(context.outputGpu.api)));
+	}
+
 	void dumpInstance(const char* why)
 	{
 		std::ostringstream out;
@@ -223,6 +264,7 @@ private:
 	}
 
 	bool renderLogged_{false};
+	bool gpuLogged_{false};
 };
 
 class HostDumpFactory final : public EffectFactory {

@@ -37,7 +37,9 @@ inline constexpr ParameterId kParameterIdRoot = 0;
 inline constexpr ParameterId kParameterIdReservedFirst = 9991;
 /*! The last identifier of the reserved range. */
 inline constexpr ParameterId kParameterIdReservedLast = 9999;
-/*! The hidden parameter that persists the instance meta and tags. */
+/*! The identifier FxGrip gives its hidden meta parameter. OfxGrip keeps the meta store inside
+    the instance state parameter under a persistence key, so no host parameter uses this ID; it
+    stays reserved for record compatibility. */
 inline constexpr ParameterId kParameterIdInstanceMeta = 9995;
 /*! The hidden parameter that persists the framework's instance state (schema version, extension
     blobs). */

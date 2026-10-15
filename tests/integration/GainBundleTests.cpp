@@ -5,6 +5,11 @@
 #include <ofxgrip/minihost/BundleLoader.hpp>
 #include <ofxgrip/minihost/MiniHost.hpp>
 
+#if defined(OFXGRIP_HAS_METAL)
+#include <ofxgrip/gpu/MetalBackend.hpp>
+#endif
+
+#include "ofxGPURender.h"
 #include "ofxParam.h"
 
 #include <gtest/gtest.h>
@@ -223,3 +228,171 @@ TEST(HostDumpBundle, LoadsDescribesAndPassesThrough)
 	instance.reset();
 	EXPECT_EQ(host.unload(), kOfxStatOK);
 }
+
+// ---- Metal frames (macOS) -----------------------------------------------------------------------
+
+#if defined(OFXGRIP_HAS_METAL)
+
+namespace {
+
+float toleranceFor(BitDepth depth)
+{
+	switch (depth) {
+	case BitDepth::UInt8: return 1.5f / 255.0f;
+	case BitDepth::UInt16: return 1.5f / 65535.0f;
+	case BitDepth::Half: return 2e-3f;
+	default: return 1e-6f;
+	}
+}
+
+void expectSameImage(const ImageBuffer& cpu, const ImageBuffer& gpu, BitDepth depth, const char* what)
+{
+	ASSERT_EQ(cpu.desc(), gpu.desc()) << what;
+	const ImageView a = cpu.view();
+	const ImageView b = gpu.view();
+	const std::size_t n = componentCount(a.desc.components);
+	for (int y = a.desc.bounds.y1; y < a.desc.bounds.y2; ++y) {
+		for (int x = a.desc.bounds.x1; x < a.desc.bounds.x2; ++x) {
+			for (std::size_t c = 0; c < n; ++c) {
+				ASSERT_NEAR(readComponent(a.pixel(x, y), depth, c), readComponent(b.pixel(x, y), depth, c), toleranceFor(depth)) << what << " at " << x << "," << y << " component " << c;
+			}
+		}
+	}
+}
+
+}  // namespace
+
+TEST_F(GainBundle, MetalRenderMatchesTheCpuRenderAcrossDepthsAndTiles)
+{
+	if (!metal::MetalContext::available()) {
+		GTEST_SKIP() << "No Metal device";
+	}
+	HostOptions options = HostOptions::spec();
+	options.metalRenderSupported = true;
+	start(options);
+	EXPECT_EQ(host_->descriptorProps()->getString(kOfxImageEffectPropMetalRenderSupported), "true");
+	instance_->setParam("gain", {1.5});
+	instance_->setParam("perChannel", {1.0});
+	instance_->setParam("gainR", {0.5});
+	instance_->setParam("gainB", {2.0});
+	instance_->setParam("gainA", {0.25});
+	for (int clamp = 0; clamp < 2; ++clamp) {
+		instance_->setParam("clamp", {static_cast<double>(clamp)});
+		for (BitDepth depth : {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float}) {
+			instance_->setInput("Source", makeRampImage(32, 16, depth));
+			RenderRequest cpu;
+			cpu.depth = depth;
+			RenderResult a = instance_->render(cpu);
+			ASSERT_TRUE(a.ok()) << toString(depth);
+			EXPECT_EQ(a.gpu, GpuApi::None);
+			RenderRequest gpu = cpu;
+			gpu.gpu = GpuApi::Metal;
+			gpu.tileSize = 7;
+			gpu.threads = 4;
+			RenderResult b = instance_->render(gpu);
+			ASSERT_TRUE(b.ok()) << toString(depth);
+			EXPECT_EQ(b.gpu, GpuApi::Metal);
+			EXPECT_EQ(b.tileCount, 15);
+			expectSameImage(a.image, b.image, depth, toString(depth).data());
+		}
+	}
+	// Alpha-only output and a disconnected source both run the same kernel.
+	instance_->setInput("Source", makeRampImage(32, 16, BitDepth::Float, Components::Alpha));
+	RenderRequest alpha;
+	alpha.components = Components::Alpha;
+	RenderResult alphaCpu = instance_->render(alpha);
+	alpha.gpu = GpuApi::Metal;
+	RenderResult alphaGpu = instance_->render(alpha);
+	ASSERT_TRUE(alphaCpu.ok() && alphaGpu.ok());
+	EXPECT_EQ(alphaGpu.gpu, GpuApi::Metal);
+	expectSameImage(alphaCpu.image, alphaGpu.image, BitDepth::Float, "alpha");
+	instance_->disconnect("Source");
+	RenderRequest none;
+	none.gpu = GpuApi::Metal;
+	RenderResult disconnected = instance_->render(none);
+	ASSERT_TRUE(disconnected.ok());
+	EXPECT_EQ(disconnected.gpu, GpuApi::Metal);
+	EXPECT_EQ(readComponent(disconnected.image.view().pixel(3, 3), BitDepth::Float, 0), 0.0f);
+}
+
+TEST_F(GainBundle, FusionPageMetalRenderCopiesTheSourceFirst)
+{
+	if (!metal::MetalContext::available()) {
+		GTEST_SKIP() << "No Metal device";
+	}
+	host_ = std::make_unique<MiniHost>(HostOptions::resolve21());
+	bundle_.setHost(host_->ofxHost());
+	ASSERT_EQ(host_->load(plugin_, OFXGRIP_GAIN_BUNDLE), kOfxStatOK);
+	ASSERT_EQ(host_->describe(), kOfxStatOK);
+	Project project;
+	project.width = 24;
+	project.height = 12;
+	instance_ = host_->createInstance(kOfxImageEffectContextFilter, project, "Fusion");
+	ASSERT_NE(instance_, nullptr);
+	instance_->setInput("Source", makeRampImage(24, 12, BitDepth::Float));
+	instance_->setParam("gain", {0.5});
+	RenderRequest cpu;
+	RenderResult a = instance_->render(cpu);
+	RenderRequest gpu;
+	gpu.gpu = GpuApi::Metal;
+	RenderResult b = instance_->render(gpu);
+	ASSERT_TRUE(a.ok() && b.ok());
+	EXPECT_EQ(b.gpu, GpuApi::Metal);
+	expectSameImage(a.image, b.image, BitDepth::Float, "fusion");
+	// The bundle carries its own copy of the backend, so its scratch pool is not visible here;
+	// the matching image is the evidence that the intermediate copy path rendered.
+}
+
+TEST_F(GainBundle, MetalRequestFallsBackToCpuFramesWithoutHostSupport)
+{
+	if (!metal::MetalContext::available()) {
+		GTEST_SKIP() << "No Metal device";
+	}
+	start(HostOptions::spec());
+	instance_->setInput("Source", makeRampImage(8, 8, BitDepth::Float));
+	instance_->setParam("gain", {0.5});
+	RenderRequest request;
+	request.gpu = GpuApi::Metal;
+	RenderResult result = instance_->render(request);
+	ASSERT_TRUE(result.ok());
+	EXPECT_EQ(result.gpu, GpuApi::None);
+}
+
+TEST(HostDumpBundleMetal, CopiesTheSourceThroughABlit)
+{
+	if (!metal::MetalContext::available()) {
+		GTEST_SKIP() << "No Metal device";
+	}
+	Bundle bundle;
+	ASSERT_TRUE(bundle.open(OFXGRIP_HOSTDUMP_BUNDLE).ok());
+	OfxPlugin* plugin = bundle.plugin(0);
+	ASSERT_NE(plugin, nullptr);
+	HostOptions options = HostOptions::spec();
+	options.metalRenderSupported = true;
+	MiniHost host(options);
+	bundle.setHost(host.ofxHost());
+	ASSERT_EQ(host.load(plugin, OFXGRIP_HOSTDUMP_BUNDLE), kOfxStatOK);
+	ASSERT_EQ(host.describe(), kOfxStatOK);
+	Project project;
+	project.width = 16;
+	project.height = 8;
+	std::unique_ptr<Instance> instance = host.createInstance(kOfxImageEffectContextFilter, project);
+	ASSERT_NE(instance, nullptr);
+	std::shared_ptr<ImageBuffer> ramp = makeRampImage(16, 8, BitDepth::Float);
+	instance->setInput("Source", ramp);
+	RenderRequest request;
+	request.gpu = GpuApi::Metal;
+	RenderResult result = instance->render(request);
+	ASSERT_TRUE(result.ok());
+	EXPECT_EQ(result.gpu, GpuApi::Metal);
+	EXPECT_EQ(result.image.bytes(), ramp->bytes());
+	// A source of a different depth is cleared instead of copied.
+	instance->setInput("Source", makeRampImage(16, 8, BitDepth::UInt8));
+	RenderResult cleared = instance->render(request);
+	ASSERT_TRUE(cleared.ok());
+	EXPECT_EQ(readComponent(cleared.image.view().pixel(5, 5), BitDepth::Float, 0), 0.0f);
+	instance.reset();
+	host.unload();
+}
+
+#endif

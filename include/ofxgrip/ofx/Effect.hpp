@@ -17,7 +17,11 @@
 #include <ofxgrip/core/Extension.hpp>
 #include <ofxgrip/core/Image.hpp>
 #include <ofxgrip/core/Manifest.hpp>
+#include <ofxgrip/core/MetaExtension.hpp>
+#include <ofxgrip/core/Parameters.hpp>
 #include <ofxgrip/core/RenderSnapshot.hpp>
+#include <ofxgrip/core/VersioningExtension.hpp>
+#include <ofxgrip/core/VisibilityExtension.hpp>
 #include <ofxgrip/ofx/Actions.hpp>
 #include <ofxgrip/ofx/OfxHostServices.hpp>
 
@@ -96,9 +100,30 @@ public:
 	const OfxHostServices& ofxServices() const { return *services_; }
 	bool attached() const noexcept { return services_ != nullptr; }
 
+	/*! The parameter objects (phase 1). Valid once attached. */
+	ParameterModel& parameters();
+	/*! A parameter by ID or key, or null. `effect[kGain]` and `effect["gain"]` read the same. */
+	Parameter* param(ParameterId id);
+	Parameter* param(std::string_view key);
+	Parameter* operator[](ParameterId id) { return param(id); }
+	Parameter* operator[](std::string_view key) { return param(key); }
+	/*! The instance's meta manager, or null when the manifest sets `manageMeta` to false. */
+	MetaManager* meta();
+	/*! The framework extensions, or null when not loaded. */
+	MetaExtension* metaExtension() { return metaExtension_; }
+	VisibilityExtension* visibilityExtension() { return visibilityExtension_; }
+	VersioningExtension* versioningExtension() { return versioningExtension_; }
+	/*! Opens a parameter-edit window for writes outside a host callback (FxGrip's out-of-band
+	    access). The window closes, and flushes when asked, when the returned scope ends. */
+	EditScope edit(std::string_view name, bool flushOnClose = true) { return EditScope(services(), name, flushOnClose); }
+
 	/*! Override points. Each default does nothing and returns success. */
 	virtual void loadExtensions(ExtensionSystem& system);
 	virtual Error onCreate();
+	/*! Runs on creation when the document was saved by an older schema or plug-in version, after
+	    the manifest's renames. Returning an error leaves the stored version unchanged so the
+	    migration runs again on the next open. */
+	virtual Error onMigrate(unsigned fromSchema, unsigned toSchema, Version fromVersion);
 	virtual Error onInstanceChanged(const ChangeEvent& change);
 	virtual Error onParameterClicked(ParameterId id);
 	virtual Error onBuildSnapshot(RenderSnapshotBuilder& builder, const RenderInfo& info);
@@ -123,9 +148,15 @@ public:
 	Error flush();
 
 private:
+	void loadFrameworkExtensions();
+
 	std::unique_ptr<EventBus> bus_;
 	std::unique_ptr<OfxHostServices> services_;
 	std::unique_ptr<ExtensionSystem> extensions_;
+	std::unique_ptr<ParameterModel> parameters_;
+	MetaExtension* metaExtension_{nullptr};
+	VisibilityExtension* visibilityExtension_{nullptr};
+	VersioningExtension* versioningExtension_{nullptr};
 	EffectManifest emptyManifest_;
 };
 

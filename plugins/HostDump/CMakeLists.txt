@@ -1,1 +1,5 @@
-ofxgrip_add_plugin(NAME OfxGripHostDump IDENTIFIER com.belisoful.ofxgrip.hostdump SOURCES HostDump.cpp)
+if(APPLE)
+  ofxgrip_add_plugin(NAME OfxGripHostDump IDENTIFIER com.belisoful.ofxgrip.hostdump SOURCES HostDump.cpp LIBRARIES OfxGrip::gpu_metal)
+else()
+  ofxgrip_add_plugin(NAME OfxGripHostDump IDENTIFIER com.belisoful.ofxgrip.hostdump SOURCES HostDump.cpp)
+endif()

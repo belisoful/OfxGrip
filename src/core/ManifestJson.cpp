@@ -287,6 +287,71 @@ Error readParameter(const Json& j, const std::string& path, ParameterSpec& out)
 	if (j.contains("selector")) {
 		out.selector = j["selector"].get<std::string>();
 	}
+	if (j.contains("targetPresets")) {
+		const auto& presets = j["targetPresets"];
+		if (!presets.is_object()) {
+			return fail(path + ".targetPresets", "expected an object keyed by option");
+		}
+		for (const auto& [option, body] : presets.items()) {
+			if (!body.is_object()) {
+				return fail(path + ".targetPresets." + option, "expected an object");
+			}
+			TargetPreset preset;
+			if (body.contains("values") && body["values"].is_object()) {
+				for (const auto& [key, v] : body["values"].items()) {
+					Value value;
+					if (!readValue(v, value)) {
+						return fail(path + ".targetPresets." + option + ".values." + key, "unreadable value");
+					}
+					preset.values[key] = std::move(value);
+				}
+			}
+			for (const char* section : {"flags", "tags"}) {
+				if (!body.contains(section) || !body[section].is_object()) {
+					continue;
+				}
+				for (const auto& [key, list] : body[section].items()) {
+					std::vector<std::string> names;
+					if (list.is_string()) {
+						names.push_back(list.get<std::string>());
+					} else if (list.is_array()) {
+						for (const auto& e : list) {
+							if (!e.is_string()) {
+								return fail(path + ".targetPresets." + option + "." + section + "." + key, "expected strings");
+							}
+							names.push_back(e.get<std::string>());
+						}
+					} else {
+						return fail(path + ".targetPresets." + option + "." + section + "." + key, "expected a string or array");
+					}
+					(std::string_view(section) == "flags" ? preset.flags : preset.tags)[key] = std::move(names);
+				}
+			}
+			if (body.contains("meta") && body["meta"].is_object()) {
+				for (const auto& [key, entries] : body["meta"].items()) {
+					if (!entries.is_object()) {
+						return fail(path + ".targetPresets." + option + ".meta." + key, "expected an object");
+					}
+					for (const auto& [name, v] : entries.items()) {
+						Value value;
+						if (!readValue(v, value)) {
+							return fail(path + ".targetPresets." + option + ".meta." + key + "." + name, "unreadable value");
+						}
+						preset.meta[key][name] = std::move(value);
+					}
+				}
+			}
+			if (body.contains("labels") && body["labels"].is_object()) {
+				for (const auto& [key, label] : body["labels"].items()) {
+					if (!label.is_string()) {
+						return fail(path + ".targetPresets." + option + ".labels." + key, "expected a string");
+					}
+					preset.labels[key] = label.get<std::string>();
+				}
+			}
+			out.targetPresets[option] = std::move(preset);
+		}
+	}
 	if (j.contains("hosts") && j["hosts"].is_object()) {
 		for (const auto& [host, o] : j["hosts"].items()) {
 			HostOverride override;
@@ -371,6 +436,41 @@ Json writeParameter(const ParameterSpec& spec)
 	}
 	if (!spec.selector.empty()) {
 		j["selector"] = spec.selector;
+	}
+	if (!spec.targetPresets.empty()) {
+		Json presets = Json::object();
+		for (const auto& [option, preset] : spec.targetPresets) {
+			Json body = Json::object();
+			if (!preset.values.empty()) {
+				Json values = Json::object();
+				for (const auto& [key, v] : preset.values) {
+					values[key] = writeValue(v);
+				}
+				body["values"] = values;
+			}
+			if (!preset.flags.empty()) {
+				body["flags"] = preset.flags;
+			}
+			if (!preset.tags.empty()) {
+				body["tags"] = preset.tags;
+			}
+			if (!preset.meta.empty()) {
+				Json meta = Json::object();
+				for (const auto& [key, entries] : preset.meta) {
+					Json inner = Json::object();
+					for (const auto& [name, v] : entries) {
+						inner[name] = writeValue(v);
+					}
+					meta[key] = inner;
+				}
+				body["meta"] = meta;
+			}
+			if (!preset.labels.empty()) {
+				body["labels"] = preset.labels;
+			}
+			presets[option] = body;
+		}
+		j["targetPresets"] = presets;
 	}
 	if (!spec.hosts.empty()) {
 		Json hosts = Json::object();

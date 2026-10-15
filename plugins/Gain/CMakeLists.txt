@@ -1,1 +1,5 @@
-ofxgrip_add_plugin(NAME OfxGripGain IDENTIFIER com.belisoful.ofxgrip.gain SOURCES Gain.cpp)
+if(APPLE)
+  ofxgrip_add_plugin(NAME OfxGripGain IDENTIFIER com.belisoful.ofxgrip.gain SOURCES Gain.cpp LIBRARIES OfxGrip::gpu_metal)
+else()
+  ofxgrip_add_plugin(NAME OfxGripGain IDENTIFIER com.belisoful.ofxgrip.gain SOURCES Gain.cpp)
+endif()

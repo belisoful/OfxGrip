@@ -56,7 +56,7 @@ enum class ParameterType : std::int16_t {
 	Toggle = 18,
 	Group = 19,
 	Point3D = 20,
-	Bytes = 21,
+	Blob = 21,       /*!< A byte-string value. Named `Blob`, as `ValueKind` is, because GCC's -Wshadow objects to `Bytes`. */
 
 	Section = 120,
 	Random = 121,
@@ -106,6 +106,21 @@ struct HostOverride {
 	bool operator==(const HostOverride&) const = default;
 };
 
+/*! The edits a choice or toggle applies to other parameters when it changes: FxGrip's target
+    preset. Every map is keyed by the target parameter's key. The sections apply in the order
+    values, flags, tags, meta, labels; labels go last because some hosts misreport a string
+    parameter when its label changes earlier in the same pass. Flag entries use the `parseFlags`
+    syntax (`"+hidden"`, `"-disabled"`), applied over the target's current host flags. */
+struct TargetPreset {
+	std::map<std::string, Value> values;
+	std::map<std::string, std::vector<std::string>> flags;
+	std::map<std::string, std::vector<std::string>> tags;
+	std::map<std::string, std::map<std::string, Value>> meta;
+	std::map<std::string, std::string> labels;
+	bool empty() const noexcept { return values.empty() && flags.empty() && tags.empty() && meta.empty() && labels.empty(); }
+	bool operator==(const TargetPreset&) const = default;
+};
+
 /*! The declaration of one parameter. */
 struct ParameterSpec {
 	ParameterId id{kParameterIdNone};
@@ -132,6 +147,9 @@ struct ParameterSpec {
 	std::string visibleWhen;               /*!< A visibility rule (phase 1). Empty means always. */
 	std::string enabledWhen;               /*!< An enablement rule (phase 1). Empty means always. */
 	std::map<std::string, HostOverride> hosts;
+	/*! Target presets keyed by the option key of a choice, or `"true"` and `"false"` for a
+	    toggle. Applied by the meta extension on a user change (phase 1). */
+	std::map<std::string, TargetPreset> targetPresets;
 	std::string selector;                  /*!< The click action name of a push button. */
 	std::vector<ParameterSpec> children;   /*!< Declared under a group; flattened at validation. */
 
@@ -169,6 +187,8 @@ struct ParameterSpec {
 	ParameterSpec& withVisibleWhen(std::string rule);
 	ParameterSpec& withEnabledWhen(std::string rule);
 	ParameterSpec& withHost(std::string host, HostOverride override);
+	ParameterSpec& withTargetPreset(std::string option, TargetPreset preset);
+	ParameterSpec& withResetValue(Value value);
 };
 
 /*! The declaration of an input clip. The output clip is implicit. */
@@ -215,7 +235,10 @@ struct EffectIdentity {
 	bool operator==(const EffectIdentity&) const = default;
 };
 
-/*! One migration step, run when a saved instance's schema version is older. */
+/*! One migration step, run when a saved instance's schema version is older. A rename copies the
+    value of a still-declared old parameter (keep it declared, hidden, and `NoState` so the host
+    persists it) into the new parameter once, then the stored schema version advances. Value
+    transforms beyond renames run in the effect's `onMigrate` hook. */
 struct Migration {
 	unsigned fromSchemaVersion{0};
 	std::map<std::string, std::string> renames;  /*!< old key → new key */
@@ -233,7 +256,10 @@ struct EffectManifest {
 	std::vector<ParameterSpec> parameters;
 	std::vector<Migration> migrations;
 	std::vector<std::string> priorUuids;   /*!< Earlier identities whose presets still apply. */
-	std::map<std::string, Value> properties; /*!< Free-form effect properties for extensions. */
+	/*! Free-form effect properties for extensions. The framework reads `manageMeta` and
+	    `manageVisibility` (both default true) to decide whether to load its meta and visibility
+	    extensions on an instance. */
+	std::map<std::string, Value> properties;
 
 	/*! Checks the manifest. The first failure is returned with context tags naming the parameter. */
 	Error validate() const;

@@ -14,6 +14,7 @@ add_library(ofxgrip_core STATIC
   core/Types.cpp
   core/Error.cpp
   core/Value.cpp
+  core/Codec.cpp
   core/Flags.cpp
   core/Manifest.cpp
   core/ManifestJson.cpp
@@ -23,7 +24,13 @@ add_library(ofxgrip_core STATIC
   core/Quirks.cpp
   core/HostProfile.cpp
   core/RenderSnapshot.cpp
-  core/Image.cpp)
+  core/Image.cpp
+  core/MetaManager.cpp
+  core/Rules.cpp
+  core/Parameters.cpp
+  core/MetaExtension.cpp
+  core/VisibilityExtension.cpp
+  core/VersioningExtension.cpp)
 add_library(OfxGrip::core ALIAS ofxgrip_core)
 target_include_directories(ofxgrip_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(ofxgrip_core PUBLIC OfxGrip::options PRIVATE nlohmann_json::nlohmann_json)
@@ -51,11 +58,24 @@ if(APPLE)
   target_link_libraries(ofxgrip PUBLIC "-framework CoreFoundation")
 endif()
 
-# ---- metal-cpp: Apple's C++ Metal interface, vendored, for the phase-1 Metal backend --------------
+# ---- metal-cpp: Apple's C++ Metal interface, vendored ---------------------------------------------
 
 if(APPLE)
   add_library(ofxgrip_metal_cpp INTERFACE)
   add_library(OfxGrip::metal_cpp ALIAS ofxgrip_metal_cpp)
-  target_include_directories(ofxgrip_metal_cpp INTERFACE "${PROJECT_SOURCE_DIR}/external/metal-cpp")
-  target_link_libraries(ofxgrip_metal_cpp INTERFACE "-framework Metal" "-framework Foundation" "-framework QuartzCore")
+  target_include_directories(ofxgrip_metal_cpp SYSTEM INTERFACE "${PROJECT_SOURCE_DIR}/external/metal-cpp")
+  target_link_libraries(ofxgrip_metal_cpp INTERFACE "-framework Metal" "-framework Foundation")
+endif()
+
+# ---- ofxgrip_gpu_metal: the Metal backend over metal-cpp -----------------------------------------
+# One static library holds metal-cpp's private implementation, so a binary links it once however
+# many of its parts (adapter, mini host, plug-in) use Metal.
+
+if(APPLE)
+  add_library(ofxgrip_gpu_metal STATIC
+    gpu/MetalBackend.cpp
+    gpu/MetalCppImpl.cpp)
+  add_library(OfxGrip::gpu_metal ALIAS ofxgrip_gpu_metal)
+  target_link_libraries(ofxgrip_gpu_metal PUBLIC OfxGrip::core PRIVATE OfxGrip::metal_cpp)
+  target_compile_definitions(ofxgrip_gpu_metal PUBLIC OFXGRIP_HAS_METAL=1)
 endif()

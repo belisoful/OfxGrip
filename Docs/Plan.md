@@ -1,6 +1,6 @@
 # OfxGrip Plan
 
-Date: 2026-10-14. Status: phase 0 built and verified (131 tests under debug, ASan+UBSan, TSan, and the x86_64 slice; 84% product line coverage; both bundles load in DaVinci Resolve 21.1.1 free). Nothing is committed yet.
+Date: 2026-10-14. Status: phase 0 is on `main`; phase 1 is built and verified (178 tests under debug, ASan+UBSan, TSan, and the x86_64 slice; Metal frames render through the mini host and match the CPU path per pixel). The per-page Resolve probes remain.
 
 OfxGrip is the OpenFX counterpart of FxGrip: a C++20 framework for OpenFX image-effect plug-ins
 that gives Resolve, Fusion, Nuke, and Natron plug-ins what FxGrip gives Final Cut Pro and Motion
@@ -70,12 +70,12 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Bundle packaging on macOS (`X.ofx.bundle/Contents/MacOS/X.ofx`, `Info.plist`), an install script that copies (never links, Q-RESOLVE-025), a validator.
 - Live: install both plug-ins in Resolve, record Q-RESOLVE-001 and the capability-dump entries in the registry. Done 2026-10-14 for the app-start scan (registry section 3.1); the per-page instance probes remain.
 
-### Phase 1: parameter model, state, Metal
+### Phase 1: parameter model, state, Metal (built 2026-10-14)
 
-- Runtime `Parameter` objects, groups, lookups. Meta and tags with hidden-parameter persistence. Visibility rules and target presets. Versioning and migrations. `EditScope`.
-- Metal backend through metal-cpp with the host's command queue; `GpuImage` for `MTLBuffer` frames; resource pool per queue; Fusion-page intermediate copy (Q-RESOLVE-031).
-- Mini host variants: Metal frames on macOS; quirk profiles for Resolve, Nuke, Natron.
-- Resolve behavior probes (registry section 5, step 2).
+- Done: runtime `Parameter` objects, groups, lookups (`effect[id]`, `effect["key"]`). Meta and tags in `MetaManager`, persisted through the state parameter by `MetaExtension`. `visibleWhen` and `enabledWhen` rules (`Rules.hpp`) applied by `VisibilityExtension`; target presets and momentary reset values applied by `MetaExtension`. Versioning and migrations (`VersioningExtension`, `Effect::onMigrate`, deprecated majors as their own plug-in slots). `Effect::edit` over `EditScope`.
+- Done: Metal backend (`include/ofxgrip/gpu/MetalBackend.hpp`) through metal-cpp with the host's command queue, a pipeline cache and scratch pool per queue, `GpuImage` over `MTLBuffer` frames, and the Fusion-page intermediate copy (Q-RESOLVE-031). `Gain` renders Metal frames; `HostDump` passes them through with a blit.
+- Done: mini host Metal frames on macOS (`RenderRequest::gpu`); quirk profiles for Resolve, Nuke, Natron.
+- Open: Resolve behavior probes (registry section 5, step 2) on the Edit, Color, and Fusion pages, including a Metal render through Resolve's queue.
 
 ### Phase 2: presets, analysis, controls, extensions
 
@@ -104,16 +104,20 @@ OfxGrip/
   Docs/            Plan.md, Architecture.md, Testing.md
   cmake/           OfxGripPlugin.cmake (bundle layout, Info.plist), toolchain helpers
   external/openfx/ vendored OpenFX 1.5.1 C headers (BSD-3) and LICENSE.md
+  external/metal-cpp/ Apple's metal-cpp (Apache-2.0)
   include/ofxgrip/ public headers
-    core/          host-neutral: Types, Error, Value, Flags, Manifest, Events, Extension,
-                   HostServices, HostProfile, Quirks, RenderSnapshot, Image, Parameters,
-                   MetaManager, Preset  (GripTruck candidates, kept free of OFX headers)
+    core/          host-neutral: Types, Error, Value, Codec, Flags, Manifest, ManifestJson, Rules,
+                   Events, Extension, HostServices, HostProfile, Quirks, RenderSnapshot, Image,
+                   Parameters, MetaManager, MetaExtension, VisibilityExtension,
+                   VersioningExtension, Preset (phase 2)  (GripTruck candidates, no OFX headers)
     ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,
-                   Plugin, HostServices, ResolveExtensions
+                   Plugin, OfxHostServices, ResolveExtensions
+    gpu/           MetalBackend (macOS); CUDA, OpenCL, and Vulkan backends in phase 3
   src/             implementation, same split
   minihost/        the headless OFX host library and `ofxgrip-minihost` CLI
   plugins/         HostDump (probe), Gain (sample)
-  tests/           GoogleTest: unit tests per header, mini-host integration tests, artifact tests
+  tests/           GoogleTest: unit tests per header, GPU backend tests, mini-host integration
+                   tests, artifact tests
   scripts/         install-bundle.sh, validate-bundle.py, dump-registry.py
   .github/         CI workflows
   local/           reference clones (ignored)
@@ -138,7 +142,7 @@ The Full Check must pass before a commit.
 2. `ctest` in that build: unit tests, mini-host integration tests, artifact tests.
 3. Build and test the `asan-ubsan` preset. Build and test the `tsan` preset (the concurrent-render stress tests run here).
 4. Build the x86_64 slice (`-DCMAKE_OSX_ARCHITECTURES=x86_64`) and run its tests under Rosetta.
-5. Coverage with the `coverage` preset at or above the gate in `CMakeLists.txt` (`OFXGRIP_COVERAGE_MIN`). The gate covers the product code (core, adapter, plug-ins); the mini host is reported separately. Phase 0 sets the gate at 80% (measured 84% on 2026-10-14); it rises to 90% as the tests grow, toward the developer's goal of complete coverage.
+5. Coverage with the `coverage` preset at or above the gate in `CMakeLists.txt` (`OFXGRIP_COVERAGE_MIN`). The gate covers the product code (core, adapter, plug-ins); the mini host is reported separately. Phase 0 set the gate at 80% (measured 84%); phase 1 raises it to 85% (measured 88.7% on 2026-10-14); it rises to 90% as the tests grow, toward the developer's goal of complete coverage.
 6. `scripts/validate-bundle.py` on every built bundle.
 
 CI runs the same steps on `macos-26`, and the build-and-test subset on `ubuntu-24.04` and
@@ -149,8 +153,9 @@ CI runs the same steps on `macos-26`, and the build-and-test subset on `ubuntu-2
 | Item | Needed |
 | --- | --- |
 | The Rust crate's repository (the toolchain is installed; the bridge is confirmed) | Phase 2 |
-| metal-cpp: approved and vendored under `external/metal-cpp` | Done |
+| metal-cpp: approved and vendored under `external/metal-cpp`; the Metal backend is built | Done |
 | Slang compiler (`slangc`) as a build dependency | Phase 3 |
 | Windows and Linux machines with Resolve for live tests | Phase 4 |
 | Licensing provider for Windows and Linux | Phase 3 |
-| Natron as a second free OFX host | Phase 1 |
+| Natron as a second free OFX host | Phase 2 |
+| Computer use (or the developer driving Resolve) for the per-page probes | Phase 1, open |

@@ -20,7 +20,12 @@ add_executable(ofxgrip_core_tests
   core/ExtensionTests.cpp
   core/HostProfileTests.cpp
   core/RenderSnapshotTests.cpp
-  core/ImageTests.cpp)
+  core/ImageTests.cpp
+  core/CodecTests.cpp
+  core/MetaManagerTests.cpp
+  core/RulesTests.cpp
+  core/ParametersTests.cpp
+  core/FrameworkExtensionsTests.cpp)
 target_link_libraries(ofxgrip_core_tests PRIVATE OfxGrip::core GTest::gtest_main)
 gtest_discover_tests(ofxgrip_core_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs")
 
@@ -43,3 +48,9 @@ target_compile_definitions(ofxgrip_integration_tests PRIVATE
   OFXGRIP_HOSTDUMP_BUNDLE="${_dump_bundle}")
 add_dependencies(ofxgrip_integration_tests ofxgrip_plugin_OfxGripGain ofxgrip_plugin_OfxGripHostDump)
 gtest_discover_tests(ofxgrip_integration_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs")
+
+if(APPLE)
+  add_executable(ofxgrip_gpu_tests gpu/MetalBackendTests.cpp)
+  target_link_libraries(ofxgrip_gpu_tests PRIVATE OfxGrip::gpu_metal GTest::gtest_main)
+  gtest_discover_tests(ofxgrip_gpu_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs")
+endif()

@@ -14,7 +14,9 @@ fi
 minimum="${minimum:-90}"
 
 profdata="$build/coverage.profdata"
-profiles="$(find "$build" -name '*.profraw' | head -2000)"
+# Only profiles written after the last build count; older ones belong to earlier binaries.
+newest="$build/tests/ofxgrip_core_tests"
+profiles="$(find "$build" -name '*.profraw' -newer "$newest" | head -2000)"
 if [ -z "$profiles" ]; then
 	echo "no .profraw files under $build; run ctest in a coverage build first" >&2
 	exit 1
@@ -25,7 +27,7 @@ llvm_cov="$(xcrun -f llvm-cov 2>/dev/null || command -v llvm-cov)"
 "$llvm_profdata" merge -sparse $profiles -o "$profdata"
 
 objects=""
-for exe in "$build"/tests/ofxgrip_core_tests "$build"/tests/ofxgrip_ofx_tests "$build"/tests/ofxgrip_integration_tests; do
+for exe in "$build"/tests/ofxgrip_core_tests "$build"/tests/ofxgrip_ofx_tests "$build"/tests/ofxgrip_integration_tests "$build"/tests/ofxgrip_gpu_tests; do
 	[ -x "$exe" ] && objects="$objects -object $exe"
 done
 for plugin in $(find "$build/plugins" -name '*.ofx' -type f 2>/dev/null); do

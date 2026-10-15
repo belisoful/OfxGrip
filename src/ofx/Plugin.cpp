@@ -57,10 +57,16 @@ MainEntryFn mainEntryTrampoline(int index) noexcept
     for it across actions. */
 class PluginSlot {
 public:
-	PluginSlot(int index, std::unique_ptr<EffectFactory> factory)
+	/*! `major` is 0 for the current version; a deprecated major gets its own slot whose manifest
+	    carries that major and no deprecation list. */
+	PluginSlot(int index, std::shared_ptr<EffectFactory> factory, unsigned major)
 	: factory_(std::move(factory)), manifest_(factory_->manifest()), identifier_(manifest_.identity.ofxId), logger_(manifest_.identity.ofxId)
 	{
 		factory_->augmentManifest(manifest_);
+		if (major != 0) {
+			manifest_.version.major = major;
+			manifest_.deprecatedMajors.clear();
+		}
 		std::memset(&plugin_, 0, sizeof plugin_);
 		plugin_.pluginApi = kOfxImageEffectPluginApi;
 		plugin_.apiVersion = kOfxImageEffectPluginApiVersion;
@@ -73,6 +79,7 @@ public:
 
 	OfxPlugin* plugin() noexcept { return &plugin_; }
 	const std::string& identifier() const noexcept { return identifier_; }
+	unsigned major() const noexcept { return manifest_.version.major; }
 
 	void setHost(OfxHost* host) noexcept { host_ = host; }
 
@@ -641,7 +648,7 @@ private:
 		return kOfxStatOK;
 	}
 
-	std::unique_ptr<EffectFactory> factory_;
+	std::shared_ptr<EffectFactory> factory_;
 	EffectManifest manifest_;
 	std::string identifier_;
 	FileLogger logger_;
@@ -671,17 +678,27 @@ int PluginRegistry::registerFactory(std::unique_ptr<EffectFactory> factory)
 		return -1;
 	}
 	std::lock_guard<std::mutex> lock(mutex_);
-	if (static_cast<int>(slots_.size()) >= kMaxPluginsPerBundle) {
+	const EffectManifest& manifest = factory->manifest();
+	std::vector<unsigned> majors{0};
+	for (unsigned major : manifest.deprecatedMajors) {
+		if (major != 0 && major < manifest.version.major) {
+			majors.push_back(major);
+		}
+	}
+	if (static_cast<int>(slots_.size() + majors.size()) > kMaxPluginsPerBundle) {
 		return -1;
 	}
-	const std::string id = factory->manifest().identity.ofxId;
+	const std::string id = manifest.identity.ofxId;
 	for (const auto& slot : slots_) {
 		if (slot->identifier() == id) {
 			return -1;
 		}
 	}
+	std::shared_ptr<EffectFactory> shared(std::move(factory));
 	const int index = static_cast<int>(slots_.size());
-	slots_.push_back(std::make_unique<PluginSlot>(index, std::move(factory)));
+	for (unsigned major : majors) {
+		slots_.push_back(std::make_unique<PluginSlot>(static_cast<int>(slots_.size()), shared, major));
+	}
 	return index;
 }
 

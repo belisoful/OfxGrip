@@ -59,5 +59,5 @@ fi
 $sudo_cmd cp -R "$bundle" "$target"
 echo "installed $target"
 if [ "$(uname -s)" = "Darwin" ]; then
-	echo "Resolve caches descriptors in /Library/Application Support/Blackmagic Design/DaVinci Resolve/OFXPluginCache.xml; bump the version or delete the cache when a descriptor changes (Q-RESOLVE-026)."
+	echo "Resolve caches descriptors in ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/OFXPluginCacheV2.xml; bump the version or delete the cache when a descriptor changes (Q-RESOLVE-026)."
 fi

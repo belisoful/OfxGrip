@@ -164,7 +164,7 @@ TEST(Manifest, ClipValidation)
 TEST(Manifest, TypeNamesRoundTripWithFxGripStrings)
 {
 	for (ParameterType t : {ParameterType::Float, ParameterType::Int, ParameterType::Toggle, ParameterType::Menu, ParameterType::PushButton, ParameterType::Group, ParameterType::Section,
-	                        ParameterType::Status, ParameterType::ObjectTracker, ParameterType::Point3D, ParameterType::Bytes}) {
+	                        ParameterType::Status, ParameterType::ObjectTracker, ParameterType::Point3D, ParameterType::Blob}) {
 		ParameterType parsed{};
 		ASSERT_TRUE(parseParameterType(toString(t), parsed)) << toString(t);
 		EXPECT_EQ(parsed, t);
@@ -192,4 +192,77 @@ TEST(Manifest, ChainingSetters)
 	EXPECT_EQ(spec.visibleWhen, "x");
 	EXPECT_EQ(spec.enabledWhen, "y");
 	EXPECT_TRUE(spec.hosts.at("resolve").exclude);
+}
+
+TEST(Manifest, ValidatesRulesAndTargetPresets)
+{
+	auto base = []() {
+		EffectManifest m;
+		m.identity.ofxId = "com.example.rules";
+		m.identity.name = "Rules";
+		m.parameters.push_back(ParameterSpec::menuParam(1, "mode", "Mode", {{"soft", "Soft"}, {"hard", "Hard"}}));
+		m.parameters.push_back(ParameterSpec::floatParam(2, "amount", "Amount", 1, 0, 1));
+		m.parameters.push_back(ParameterSpec::boolParam(3, "on", "On", true));
+		return m;
+	};
+	EffectManifest ok = base();
+	ok.parameters[1].withVisibleWhen("mode == 'soft' && on").withEnabledWhen("amount > 0");
+	TargetPreset preset;
+	preset.values["amount"] = Value(0.5);
+	preset.flags["amount"] = {"+hidden"};
+	ok.parameters[0].withTargetPreset("soft", preset);
+	TargetPreset toggle;
+	toggle.labels["amount"] = "A";
+	ok.parameters[2].withTargetPreset("true", toggle).withResetValue(Value(false));
+	EXPECT_TRUE(ok.validate().ok()) << ok.validate().describe();
+	EXPECT_EQ(ok.parameters[2].resetValue, Value(false));
+
+	auto expectInvalid = [](EffectManifest m, const char* why) {
+		Error e = m.validate();
+		EXPECT_EQ(e.code(), ErrorCode::InvalidManifest) << why;
+		EXPECT_NE(e.message().find(why), std::string::npos) << e.describe();
+	};
+	EffectManifest m = base();
+	m.parameters[1].visibleWhen = "mode ==";
+	expectInvalid(m, "visibleWhen rule does not parse");
+	m = base();
+	m.parameters[1].visibleWhen = "ghost == 1";
+	expectInvalid(m, "visibleWhen rule names an undeclared");
+	m = base();
+	m.parameters[1].enabledWhen = "(";
+	expectInvalid(m, "enabledWhen rule does not parse");
+	m = base();
+	m.parameters[1].enabledWhen = "ghost";
+	expectInvalid(m, "enabledWhen rule names an undeclared");
+	m = base();
+	m.parameters[1].withTargetPreset("x", preset);
+	expectInvalid(m, "Only a choice or a toggle");
+	m = base();
+	m.parameters[0].withTargetPreset("nonesuch", preset);
+	expectInvalid(m, "unknown option");
+	m = base();
+	m.parameters[2].withTargetPreset("yes", preset);
+	expectInvalid(m, "keyed by");
+	TargetPreset badKey;
+	badKey.values["ghost"] = Value(1);
+	m = base();
+	m.parameters[0].withTargetPreset("soft", badKey);
+	expectInvalid(m, "undeclared parameter ghost");
+	for (int section = 0; section < 4; ++section) {
+		TargetPreset bad;
+		switch (section) {
+		case 0: bad.flags["ghost"] = {"+hidden"}; break;
+		case 1: bad.tags["ghost"] = {"t"}; break;
+		case 2: bad.meta["ghost"] = {{"k", Value(1)}}; break;
+		default: bad.labels["ghost"] = "L"; break;
+		}
+		m = base();
+		m.parameters[0].withTargetPreset("soft", bad);
+		expectInvalid(m, "undeclared parameter ghost");
+	}
+	TargetPreset badFlag;
+	badFlag.flags["amount"] = {"+sparkly"};
+	m = base();
+	m.parameters[0].withTargetPreset("soft", badFlag);
+	expectInvalid(m, "unknown flag");
 }

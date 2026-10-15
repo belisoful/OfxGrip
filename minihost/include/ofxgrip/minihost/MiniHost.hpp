@@ -106,6 +106,10 @@ struct RenderRequest {
 	unsigned threads{1};
 	bool draft{false};
 	bool interactive{false};
+	/*! The GPU API to hand frames in. `Metal` uploads the inputs to `MTLBuffer`s, passes the
+	    host's own command queue, and reads the output buffer back; it falls back to CPU frames
+	    when the host options or the plug-in descriptor lack Metal, or no device exists. */
+	GpuApi gpu{GpuApi::None};
 };
 
 /*! What a render produced. */
@@ -117,6 +121,7 @@ struct RenderResult {
 	int tileCount{0};
 	std::vector<OfxStatus> tileStatuses;
 	OfxStatus status{kOfxStatOK};
+	GpuApi gpu{GpuApi::None};  /*!< The API the frames were handed in. */
 	bool ok() const noexcept
 	{
 		if (status != kOfxStatOK) {
@@ -231,7 +236,9 @@ public:
 	/*! The clips a context described, in order. */
 	std::vector<std::string> contextClips(const std::string& context) const;
 
-	std::unique_ptr<Instance> createInstance(const std::string& context, const Project& project, const std::string& resolvePage = {});
+	/*! Creates an instance: instantiates the context's parameters, runs `restore` over them so a
+	    test can imitate a host restoring a saved document, then dispatches the create action. */
+	std::unique_ptr<Instance> createInstance(const std::string& context, const Project& project, const std::string& resolvePage = {}, const std::function<void(ParamSet&)>& restore = {});
 
 	/*! Every action dispatched, with the handle kind, in order. */
 	std::vector<std::string> actionLog() const;

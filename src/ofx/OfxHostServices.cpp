@@ -469,6 +469,7 @@ struct OfxHostServices::Impl {
 			auto it = outer_.idsByKey_.find(std::string(key));
 			return it == outer_.idsByKey_.end() ? kParameterIdNone : it->second;
 		}
+		std::vector<ParameterId> ids() const override { return outer_.orderedIds_; }
 
 		std::atomic<int> editDepth_{0};
 
@@ -1067,6 +1068,7 @@ Error OfxHostServices::bind()
 		return Error::make(ErrorCode::BadHandle, "The instance has no parameter set");
 	}
 	bindings_.clear();
+	orderedIds_.clear();
 	idsByKey_.clear();
 	std::vector<ParameterSpec> flat = manifest_.flattenedParameters();
 	for (ParameterSpec& extra : frameworkParameters()) {
@@ -1087,6 +1089,7 @@ Error OfxHostServices::bind()
 		binding.handle = handle;
 		binding.properties = PropertySet(suites_.property, props);
 		idsByKey_[spec.key] = spec.id;
+		orderedIds_.push_back(spec.id);
 		bindings_[spec.id] = std::move(binding);
 	}
 	clips_.clear();

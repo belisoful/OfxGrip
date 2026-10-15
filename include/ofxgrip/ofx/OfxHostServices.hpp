@@ -25,6 +25,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 OFXGRIP_NAMESPACE_BEGIN
 
@@ -113,6 +114,8 @@ public:
 	PropertySet clipProperties(std::string_view name) const;
 	const ParameterBinding* binding(ParameterId id) const noexcept;
 	const std::map<ParameterId, ParameterBinding>& bindings() const noexcept { return bindings_; }
+	/*! The bound parameter IDs in declaration order. */
+	const std::vector<ParameterId>& orderedIds() const noexcept { return orderedIds_; }
 	/*! The Resolve page the instance was created on, or empty. */
 	const std::string& resolvePage() const noexcept { return resolvePage_; }
 	void setResolvePage(std::string page) { resolvePage_ = std::move(page); }
@@ -129,6 +132,7 @@ private:
 	OfxParamSetHandle paramSet_{nullptr};
 	static thread_local Phase threadPhase_;
 	std::map<ParameterId, ParameterBinding> bindings_;
+	std::vector<ParameterId> orderedIds_;
 	std::map<std::string, ParameterId> idsByKey_;
 	std::map<std::string, OfxImageClipHandle> clips_;
 	std::string resolvePage_;

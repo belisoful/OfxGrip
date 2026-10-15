@@ -59,14 +59,16 @@ Build and test are also run on Linux and Windows in CI once those platforms land
 
 Resolve loads bundles from `/Library/OFX/Plugins`. `scripts/install-bundle.sh <bundle>` copies a built
 bundle there (a copy, never a symlink: Q-RESOLVE-025). Resolve caches descriptors in
-`OFXPluginCache.xml`; bump the plug-in version or delete the cache when a descriptor changes
+`~/Library/Application Support/Blackmagic Design/DaVinci Resolve/OFXPluginCacheV2.xml`; bump the plug-in version or delete the cache when a descriptor changes
 (Q-RESOLVE-026). The `HostDump` probe writes its log to `~/Library/Logs/OfxGrip/`.
 
 ## Dependencies
 
 - The OpenFX 1.5.1 C headers, vendored under `external/openfx/` (BSD-3-Clause).
 - GoogleTest and nlohmann/json, fetched by CMake at configure time with pinned versions.
-- No host SDK beyond the headers. No Objective-C. Metal is reached through metal-cpp (phase 1).
+- Apple's metal-cpp, vendored under `external/metal-cpp/` (Apache-2.0), for the Metal backend.
+- No host SDK beyond the headers. No Objective-C: Metal is reached through metal-cpp, and exactly
+  one translation unit (`src/gpu/MetalCppImpl.cpp`) defines its private implementation.
 
 The reference repositories under `local/` are concept-only (D-001). Never copy, port, or closely
 paraphrase their code. The official OpenFX headers are a separate case.
@@ -74,19 +76,24 @@ paraphrase their code. The official OpenFX headers are a separate case.
 ## Project Structure
 
 - `include/ofxgrip/core/` — host-neutral headers, no OpenFX include: `Types`, `Error`, `Value`,
-  `Flags`, `Manifest`, `ManifestJson`, `Events`, `Extension`, `HostServices`, `HostProfile`,
-  `Quirks`, `RenderSnapshot`, `Image`. These are the GripTruck candidates.
+  `Codec`, `Flags`, `Manifest`, `ManifestJson`, `Rules`, `Events`, `Extension`, `HostServices`,
+  `HostProfile`, `Quirks`, `RenderSnapshot`, `Image`, `Parameters`, `MetaManager`,
+  `MetaExtension`, `VisibilityExtension`, `VersioningExtension`. These are the GripTruck
+  candidates.
 - `include/ofxgrip/ofx/` — the OpenFX adapter: `Suites`, `PropertySet`, `Actions`, `Descriptor`,
   `Effect`, `Plugin`, `OfxHostServices`, `ResolveExtensions`.
-- `src/core/`, `src/ofx/` — implementations, same split.
+- `include/ofxgrip/gpu/` — the GPU backends: `MetalBackend` (macOS). Opaque handles only; no
+  Metal header is included from a public header.
+- `src/core/`, `src/ofx/`, `src/gpu/` — implementations, same split.
 - `minihost/` — the headless OFX host (library and `ofxgrip-minihost` CLI).
 - `plugins/` — `HostDump` (probe) and `Gain` (sample), each built into an `.ofx.bundle`.
-- `tests/core/`, `tests/ofx/`, `tests/integration/` — GoogleTest. Test files mirror the header they
-  cover: `ManifestTests.cpp` covers `Manifest.hpp`.
+- `tests/core/`, `tests/ofx/`, `tests/gpu/`, `tests/integration/` — GoogleTest. Test files mirror
+  the header they cover: `ManifestTests.cpp` covers `Manifest.hpp`. `tests/core/FakeServices.hpp`
+  holds the in-memory host services the host-free tests share.
 - `cmake/` — `OfxGripPlugin.cmake` (bundle layout, `Info.plist`), sanitizer and coverage helpers.
 - `scripts/` — `install-bundle.sh`, `validate-bundle.py`, `coverage.sh`.
 - `Docs/` — `Plan.md`, `Architecture.md`, `Testing.md`.
-- `external/openfx/` — vendored headers and license.
+- `external/openfx/`, `external/metal-cpp/` — vendored headers and licenses.
 
 Rules of the layering:
 
@@ -95,6 +102,9 @@ Rules of the layering:
 - Effect code asks `HostProfile::has(Quirk)` for host behavior, never for a host name.
 - Every parameter read and write goes through `ParameterService`, so the API-traffic events fire.
 - Render reads only the `RenderSnapshot` and the images handed to it. It mutates no instance state.
+- A Metal render encodes on the host's queue and commits without waiting. The only process-wide
+  state on a render path is the backend's cache of immutable pipelines and reusable scratch
+  buffers, under a mutex.
 
 ## Code Conventions
 
@@ -110,7 +120,8 @@ Rules of the layering:
   maps to an `OfxStatus`. Unknown actions answer `kOfxStatReplyDefault`.
 - Errors are `Error` values with a code, a user message, a developer message, and context tags.
   Cancellation is a separate outcome, never an error.
-- No process-wide mutable globals on render paths. No environment variables at render time.
+- No process-wide mutable globals on render paths, apart from the GPU backend's pipeline and
+  scratch cache. No environment variables at render time.
 - Document the introducing version on new public types and functions.
 - **Backward compatibility** — point releases stay backward compatible. Minor releases may break
   before 1.0, but minimize the breaks.

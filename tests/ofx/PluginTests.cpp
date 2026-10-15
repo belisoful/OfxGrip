@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 
 using namespace ofxgrip;
@@ -315,7 +316,11 @@ TEST_F(Fixture, PersistenceSurvivesSyncPrivateData)
 	ASSERT_TRUE(effect->services().persistence().load("clicks", clicks).ok());
 	ASSERT_EQ(clicks.size(), 1u);
 	EXPECT_EQ(clicks[0], 1);
-	EXPECT_EQ(effect->services().persistence().keys().size(), 1u);
+	// The framework keeps its version record and meta store beside the effect's own blob.
+	const std::vector<std::string> keys = effect->services().persistence().keys();
+	EXPECT_NE(std::find(keys.begin(), keys.end(), "clicks"), keys.end());
+	EXPECT_NE(std::find(keys.begin(), keys.end(), std::string(VersioningExtension::kPersistenceKey)), keys.end());
+	EXPECT_NE(std::find(keys.begin(), keys.end(), std::string(MetaExtension::kPersistenceKey)), keys.end());
 }
 
 TEST_F(Fixture, SnapshotCarriesTimedValuesAndExtras)
@@ -754,7 +759,8 @@ TEST_F(Fixture, ServicesEdgeCases)
 	EXPECT_EQ(s.persistence().load("missing", none).code(), ErrorCode::NotFound);
 	EXPECT_TRUE(s.persistence().store("k", Bytes{1}).ok());
 	EXPECT_TRUE(s.persistence().remove("k").ok());
-	EXPECT_TRUE(s.persistence().keys().empty());
+	const std::vector<std::string> keys = s.persistence().keys();
+	EXPECT_EQ(std::find(keys.begin(), keys.end(), "k"), keys.end());
 	s.log().debug("debug line");
 	s.log().warning("warning line");
 	s.log().error("error line");
@@ -790,5 +796,229 @@ TEST_F(Fixture, StateParameterIsRestoredOnANewInstance)
 	third->setStringParam(kInstanceStateParameterKey, "OGST1:not base64!!");
 	Effect* effect = static_cast<Effect*>(third->props().getPointer(kOfxPropInstanceData));
 	ASSERT_NE(effect, nullptr);
-	EXPECT_TRUE(effect->services().persistence().keys().empty());
+	// The unreadable blob was discarded: only the framework's fresh records remain.
+	const std::vector<std::string> keys = effect->services().persistence().keys();
+	EXPECT_EQ(std::find(keys.begin(), keys.end(), "clicks"), keys.end());
+	EXPECT_NE(std::find(keys.begin(), keys.end(), std::string(VersioningExtension::kPersistenceKey)), keys.end());
+}
+
+// ---- phase 1: the parameter model and the framework extensions through the adapter -----------
+
+namespace {
+
+enum : ParameterId { kRigMode = 400, kRigSoftness = 401, kRigEdge = 402, kRigBypass = 403, kRigOld = 404, kRigNew = 405 };
+
+EffectManifest riggedManifest()
+{
+	EffectManifest m = testManifest();
+	m.identity.ofxId = "com.belisoful.ofxgrip.rigged";
+	m.version = Version{3, 0, 0};
+	m.deprecatedMajors = {1, 2};
+	m.schemaVersion = 2;
+	TargetPreset soft;
+	soft.values["rigSoftness"] = Value(0.75);
+	soft.labels["rigSoftness"] = "Feather";
+	soft.tags["rigEdge"] = {"soft-only"};
+	TargetPreset hard;
+	hard.labels["rigSoftness"] = "Softness";
+	m.parameters.push_back(ParameterSpec::menuParam(kRigMode, "rigMode", "Rig Mode", {{"soft", "Soft"}, {"hard", "Hard"}}, 1).withTargetPreset("soft", soft).withTargetPreset("hard", hard));
+	m.parameters.push_back(ParameterSpec::floatParam(kRigSoftness, "rigSoftness", "Softness", 0.5, 0, 1).withVisibleWhen("rigMode == 'soft'").withTags({"rig"}).withMeta("unit", Value("px")));
+	m.parameters.push_back(ParameterSpec::floatParam(kRigEdge, "rigEdge", "Edge", 0.5, 0, 1).withEnabledWhen("!rigBypass"));
+	m.parameters.push_back(ParameterSpec::boolParam(kRigBypass, "rigBypass", "Bypass", false));
+	m.parameters.push_back(ParameterSpec::floatParam(kRigOld, "rigOld", "Old", 0.25, 0, 1).withFlags(HostFlags(HostFlag::Hidden), AppFlags(AppFlag::NoState)));
+	m.parameters.push_back(ParameterSpec::floatParam(kRigNew, "rigNew", "New", 0.0, 0, 1));
+	Migration rename;
+	rename.fromSchemaVersion = 1;
+	rename.renames["rigOld"] = "rigNew";
+	m.migrations.push_back(rename);
+	return m;
+}
+
+class RiggedEffect final : public Effect {
+public:
+	static inline std::vector<std::string> migrations;
+	Error onMigrate(unsigned from, unsigned to, Version fromVersion) override
+	{
+		migrations.push_back(std::to_string(from) + "->" + std::to_string(to) + "@" + fromVersion.toString());
+		return Error::none();
+	}
+	Error render(RenderContext&) override { return Error::none(); }
+};
+
+class Rigged : public ::testing::Test {
+protected:
+	void SetUp() override
+	{
+		RiggedEffect::migrations.clear();
+		PluginRegistry::instance().clear();
+		index_ = PluginRegistry::instance().registerFactory(std::make_unique<EffectFactoryFor<RiggedEffect>>(riggedManifest()));
+		ASSERT_GE(index_, 0);
+	}
+	void TearDown() override
+	{
+		instance_.reset();
+		host_.reset();
+		PluginRegistry::instance().clear();
+	}
+	void start(int slot, HostOptions options = HostOptions::spec())
+	{
+		host_ = std::make_unique<MiniHost>(options);
+		ASSERT_EQ(host_->load(PluginRegistry::instance().plugin(slot), "/tmp/rigged.ofx.bundle"), kOfxStatOK);
+		ASSERT_EQ(host_->describe(), kOfxStatOK);
+		Project project;
+		instance_ = host_->createInstance(kOfxImageEffectContextFilter, project);
+		ASSERT_NE(instance_, nullptr);
+	}
+	Effect* effect() { return static_cast<Effect*>(instance_->props().getPointer(kOfxPropInstanceData)); }
+	int index_{-1};
+	std::unique_ptr<MiniHost> host_;
+	std::unique_ptr<Instance> instance_;
+};
+
+}  // namespace
+
+TEST_F(Rigged, DeprecatedMajorsTakeTheirOwnSlots)
+{
+	EXPECT_EQ(PluginRegistry::instance().count(), 3);
+	EXPECT_EQ(PluginRegistry::instance().plugin(0)->pluginVersionMajor, 3u);
+	EXPECT_EQ(PluginRegistry::instance().plugin(1)->pluginVersionMajor, 1u);
+	EXPECT_EQ(PluginRegistry::instance().plugin(2)->pluginVersionMajor, 2u);
+	EXPECT_STREQ(PluginRegistry::instance().plugin(2)->pluginIdentifier, "com.belisoful.ofxgrip.rigged");
+	// The same identifier cannot register twice, whatever its majors.
+	EXPECT_EQ(PluginRegistry::instance().registerFactory(std::make_unique<EffectFactoryFor<RiggedEffect>>(riggedManifest())), -1);
+	start(2);
+	EXPECT_EQ(effect()->services().identity().pluginVersion.major, 2u);
+	EXPECT_TRUE(effect()->manifest().deprecatedMajors.empty());
+}
+
+TEST_F(Rigged, ParameterObjectsReadAndWriteThroughTheHost)
+{
+	start(0);
+	Effect& e = *effect();
+	ASSERT_NE(e.param("gain"), nullptr);
+	EXPECT_EQ(e[kGain], e.param("gain"));
+	EXPECT_EQ(e["gain"], e.param(kGain));
+	EXPECT_EQ(e.param("nonesuch"), nullptr);
+	EXPECT_DOUBLE_EQ(e["gain"]->number(0), 1.0);
+	EXPECT_EQ(e["mode"]->currentOptionKey(), "b");
+	EXPECT_EQ(e["group"]->children().size(), 1u);
+	EXPECT_EQ(e["inner"]->parent(), e["group"]);
+	EXPECT_EQ(e.parameters().size(), e.services().parameters().ids().size());
+	EXPECT_NE(e.parameters().find(kParameterIdInstanceState), nullptr);
+	EXPECT_TRUE(e["rigSoftness"]->hasTag("rig"));
+	EXPECT_EQ(e["rigSoftness"]->meta("unit")->as<std::string>(), "px");
+	ASSERT_NE(e.meta(), nullptr);
+	EXPECT_EQ(e.meta()->parametersWithTag("rig"), std::vector<ParameterId>{kRigSoftness});
+	// Writes outside a callback need an edit scope.
+	EXPECT_EQ(e["gain"]->setCurrent(Value(2.0)).code(), ErrorCode::WrongPhase);
+	{
+		EditScope scope = e.edit("test");
+		EXPECT_TRUE(scope.open());
+		EXPECT_TRUE(e["gain"]->setCurrent(Value(2.0)).ok());
+		EXPECT_TRUE(e["rigSoftness"]->addTag("user").ok());
+	}
+	EXPECT_EQ(numericValue(*instance_, "gain")[0], 2.0);
+	EXPECT_TRUE(e.meta()->hasTag(kRigSoftness, "user"));
+	EXPECT_FALSE(e.meta()->dirty());  // the scope's flush saved it
+	EXPECT_NE(e.metaExtension(), nullptr);
+	EXPECT_NE(e.visibilityExtension(), nullptr);
+	EXPECT_NE(e.versioningExtension(), nullptr);
+}
+
+TEST_F(Rigged, TargetPresetsAndRulesApplyThroughInstanceChanged)
+{
+	start(0);
+	Effect& e = *effect();
+	// On creation: mode is hard, so softness is hidden; bypass is off, so edge is enabled.
+	EXPECT_EQ(instance_->param("rigSoftness")->props().getInt(kOfxParamPropSecret, -1), 1);
+	EXPECT_EQ(instance_->param("rigEdge")->props().getInt(kOfxParamPropEnabled, -1), 1);
+	instance_->setParam("rigMode", {0.0});
+	ASSERT_EQ(instance_->instanceChanged("rigMode"), kOfxStatOK);
+	EXPECT_EQ(instance_->param("rigSoftness")->props().getInt(kOfxParamPropSecret, -1), 0);
+	EXPECT_EQ(numericValue(*instance_, "rigSoftness")[0], 0.75);
+	EXPECT_EQ(instance_->param("rigSoftness")->props().getString(kOfxPropLabel), "Feather");
+	EXPECT_TRUE(e.meta()->hasTag(kRigEdge, "soft-only"));
+	instance_->setParam("rigBypass", {1.0});
+	ASSERT_EQ(instance_->instanceChanged("rigBypass"), kOfxStatOK);
+	EXPECT_EQ(instance_->param("rigEdge")->props().getInt(kOfxParamPropEnabled, -1), 0);
+	instance_->setParam("rigMode", {1.0});
+	ASSERT_EQ(instance_->instanceChanged("rigMode"), kOfxStatOK);
+	EXPECT_EQ(instance_->param("rigSoftness")->props().getInt(kOfxParamPropSecret, -1), 1);
+	EXPECT_EQ(instance_->param("rigSoftness")->props().getString(kOfxPropLabel), "Softness");
+	// Sync re-applies the rules after the host restores values behind the plug-in's back.
+	instance_->setParam("rigBypass", {0.0});
+	ASSERT_EQ(instance_->syncPrivateData(), kOfxStatOK);
+	EXPECT_EQ(instance_->param("rigEdge")->props().getInt(kOfxParamPropEnabled, -1), 1);
+	// The meta store travels in the state parameter.
+	const std::string stored = stringValue(*instance_, kInstanceStateParameterKey);
+	EXPECT_EQ(stored.rfind("OGST1:", 0), 0u);
+	Bytes blob;
+	ASSERT_TRUE(e.services().persistence().load(MetaExtension::kPersistenceKey, blob).ok());
+	MetaManager decoded;
+	ASSERT_TRUE(MetaManager::decode(blob, decoded).ok());
+	EXPECT_TRUE(decoded.hasTag(kRigEdge, "soft-only"));
+}
+
+TEST_F(Rigged, VersionIsRecordedAndMigrationsRunOnOlderDocuments)
+{
+	start(0);
+	Effect& e = *effect();
+	ASSERT_NE(e.versioningExtension(), nullptr);
+	EXPECT_FALSE(e.versioningExtension()->stored().has_value());
+	EXPECT_TRUE(RiggedEffect::migrations.empty());
+	ASSERT_EQ(instance_->syncPrivateData(), kOfxStatOK);
+	Bytes bytes;
+	ASSERT_TRUE(e.services().persistence().load(VersioningExtension::kPersistenceKey, bytes).ok());
+	StoredVersion v;
+	ASSERT_TRUE(VersioningExtension::decode(bytes, v).ok());
+	EXPECT_EQ(v.schemaVersion, 2u);
+	EXPECT_EQ(v.pluginVersion, (Version{3, 0, 0}));
+
+	// A document from schema 1 (plug-in 1.0.0): the rename copies rigOld into rigNew.
+	instance_.reset();
+	Project project;
+	std::unique_ptr<Instance> older = host_->createInstance(kOfxImageEffectContextFilter, project);
+	Effect* olderEffect = static_cast<Effect*>(older->props().getPointer(kOfxPropInstanceData));
+	ASSERT_NE(olderEffect, nullptr);
+	ASSERT_TRUE(olderEffect->services().persistence().store(VersioningExtension::kPersistenceKey, VersioningExtension::encode(StoredVersion{1, Version{1, 0, 0}})).ok());
+	ASSERT_EQ(older->syncPrivateData(), kOfxStatOK);
+	const std::string legacyState = stringValue(*older, kInstanceStateParameterKey);
+	older.reset();
+	// The host restores the saved parameters before it creates the instance.
+	instance_ = host_->createInstance(kOfxImageEffectContextFilter, project, {}, [&legacyState](ParamSet& params) {
+		params.find(kInstanceStateParameterKey)->setStringValue(legacyState);
+		params.find("rigOld")->setNumericValue({0.25});
+	});
+	ASSERT_NE(instance_, nullptr);
+	Effect& migrated = *effect();
+	ASSERT_TRUE(migrated.versioningExtension()->stored().has_value());
+	EXPECT_EQ(migrated.versioningExtension()->stored()->schemaVersion, 1u);
+	EXPECT_TRUE(migrated.versioningExtension()->migrated());
+	EXPECT_EQ(RiggedEffect::migrations, std::vector<std::string>{"1->2@1.0.0"});
+	EXPECT_EQ(numericValue(*instance_, "rigNew")[0], 0.25);
+}
+
+TEST_F(Rigged, ManifestPropertiesDisableTheFrameworkExtensions)
+{
+	PluginRegistry::instance().clear();
+	EffectManifest m = riggedManifest();
+	m.identity.ofxId = "com.belisoful.ofxgrip.plain";
+	m.deprecatedMajors.clear();
+	m.properties["manageMeta"] = Value(false);
+	m.properties["manageVisibility"] = Value(false);
+	index_ = PluginRegistry::instance().registerFactory(std::make_unique<EffectFactoryFor<RiggedEffect>>(m));
+	ASSERT_GE(index_, 0);
+	start(0);
+	Effect& e = *effect();
+	EXPECT_EQ(e.meta(), nullptr);
+	EXPECT_EQ(e.metaExtension(), nullptr);
+	EXPECT_EQ(e.visibilityExtension(), nullptr);
+	EXPECT_NE(e.versioningExtension(), nullptr);
+	EXPECT_EQ(e["rigSoftness"]->tags(), std::vector<std::string>{"rig"});
+	EXPECT_EQ(e["rigSoftness"]->addTag("x").code(), ErrorCode::Unsupported);
+	// Without the extensions, neither rules nor presets run.
+	EXPECT_EQ(instance_->param("rigSoftness")->props().getInt(kOfxParamPropSecret, -1), 0);
+	instance_->setParam("rigMode", {0.0});
+	ASSERT_EQ(instance_->instanceChanged("rigMode"), kOfxStatOK);
+	EXPECT_EQ(numericValue(*instance_, "rigSoftness")[0], 0.5);
 }

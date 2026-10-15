@@ -2,6 +2,10 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/minihost/MiniHost.hpp>
 
+#if defined(OFXGRIP_HAS_METAL)
+#include <ofxgrip/gpu/MetalBackend.hpp>
+#endif
+
 #include "ofxGPURender.h"
 #include "ofxMemory.h"
 #include "ofxMessage.h"
@@ -111,6 +115,9 @@ struct RenderTask {
 	RectI tile;
 	Point2D renderScale{1, 1};
 	Field field{Field::None};
+	GpuApi gpu{GpuApi::None};
+	void* gpuOutput{nullptr};                             /*!< The output frame's `MTLBuffer`. */
+	const std::map<std::string, void*>* gpuInputs{nullptr}; /*!< Clip name → input `MTLBuffer`. */
 };
 thread_local RenderTask* currentTask = nullptr;
 thread_local unsigned currentThreadIndex = 0;
@@ -281,9 +288,15 @@ struct HostSuites {
 				return kOfxStatFailed;
 			}
 			ImageView full = task->output->view();
+			const bool scaleOne = task->instance->host().options().imageScaleAlwaysOne;
+			if (task->gpu != GpuApi::None) {
+				// A GPU frame covers the whole window; the render window selects the tile.
+				full.data = static_cast<std::uint8_t*>(task->gpuOutput);
+				*imageHandle = makeImage(full, nullptr, scale, scaleOne, field)->props.handle();
+				return kOfxStatOK;
+			}
 			ImageView tile = full.subView(task->tile);
 			tile.desc.regionOfDefinition = full.desc.bounds;
-			const bool scaleOne = task->instance->host().options().imageScaleAlwaysOne;
 			*imageHandle = makeImage(tile, nullptr, scale, scaleOne, field)->props.handle();
 			return kOfxStatOK;
 		}
@@ -296,7 +309,14 @@ struct HostSuites {
 		if (task != nullptr) {
 			scaleOne = task->instance->host().options().imageScaleAlwaysOne;
 		}
-		*imageHandle = makeImage(image->view(), image, scale, scaleOne, field)->props.handle();
+		ImageView view = image->view();
+		if (task != nullptr && task->gpu != GpuApi::None && task->gpuInputs != nullptr) {
+			auto gpu = task->gpuInputs->find(clip->name());
+			if (gpu != task->gpuInputs->end()) {
+				view.data = static_cast<std::uint8_t*>(gpu->second);
+			}
+		}
+		*imageHandle = makeImage(view, image, scale, scaleOne, field)->props.handle();
 		return kOfxStatOK;
 	}
 	static OfxStatus clipReleaseImage(OfxPropertySetHandle imageHandle)
@@ -885,7 +905,7 @@ std::vector<std::string> MiniHost::contextClips(const std::string& context) cons
 	return out;
 }
 
-std::unique_ptr<Instance> MiniHost::createInstance(const std::string& context, const Project& project, const std::string& resolvePage)
+std::unique_ptr<Instance> MiniHost::createInstance(const std::string& context, const Project& project, const std::string& resolvePage, const std::function<void(ParamSet&)>& restore)
 {
 	auto it = contextDescriptors_.find(context);
 	if (it == contextDescriptors_.end()) {
@@ -912,6 +932,9 @@ std::unique_ptr<Instance> MiniHost::createInstance(const std::string& context, c
 	p.setInt(kOfxImageEffectInstancePropSequentialRender, 0);
 	p.setPointer(kOfxPropInstanceData, nullptr);
 	object->setParams(contextDescriptor.params().instantiate());
+	if (restore) {
+		restore(object->params());
+	}
 	for (const auto& clip : contextDescriptor.clips()) {
 		Clip* instanceClip = object->defineClip(clip->name());
 		PropSet& cp = instanceClip->props();
@@ -1215,6 +1238,37 @@ RenderResult Instance::render(const RenderRequest& request)
 		return result;
 	}
 
+	// GPU frames: upload the inputs, allocate the output, and hand the plug-in the host's queue.
+	std::map<std::string, void*> gpuInputHandles;
+	void* gpuOutputHandle = nullptr;
+	void* gpuQueue = nullptr;
+#if defined(OFXGRIP_HAS_METAL)
+	std::shared_ptr<metal::MetalContext> metalContext;
+	std::vector<metal::MetalBuffer> metalBuffers;
+	metal::MetalBuffer metalOutput;
+	if (request.gpu == GpuApi::Metal && host_.options().metalRenderSupported) {
+		PropSet* descriptor = host_.descriptorProps();
+		const bool pluginSupportsMetal = descriptor != nullptr && descriptor->getString(kOfxImageEffectPropMetalRenderSupported, "false") == "true";
+		if (pluginSupportsMetal) {
+			metalContext = metal::MetalContext::systemDefault();
+		}
+	}
+	if (metalContext) {
+		for (const auto& clip : object_->clips()) {
+			std::shared_ptr<const ImageBuffer> image = clip->isOutput() ? nullptr : clip->image();
+			if (!image) {
+				continue;
+			}
+			metalBuffers.push_back(metalContext->newBuffer(image->bytes().size(), image->bytes().data()));
+			gpuInputHandles[clip->name()] = metalBuffers.back().handle();
+		}
+		metalOutput = metalContext->newBuffer(result.image.bytes().size());
+		gpuOutputHandle = metalOutput.handle();
+		gpuQueue = metalContext->queue();
+		result.gpu = GpuApi::Metal;
+	}
+#endif
+
 	PropSet seq;
 	seq.setDoubles(kOfxImageEffectPropFrameRange, {request.time, request.time});
 	seq.setDouble(kOfxImageEffectPropFrameStep, 1.0);
@@ -1223,6 +1277,10 @@ RenderResult Instance::render(const RenderRequest& request)
 	seq.setInt(kOfxImageEffectPropSequentialRenderStatus, 0);
 	seq.setInt(kOfxImageEffectPropInteractiveRenderStatus, request.interactive ? 1 : 0);
 	seq.setInt(kOfxImageEffectPropRenderQualityDraft, request.draft ? 1 : 0);
+	seq.setInt(kOfxImageEffectPropMetalEnabled, result.gpu == GpuApi::Metal ? 1 : 0);
+	if (result.gpu == GpuApi::Metal) {
+		seq.setPointer(kOfxImageEffectPropMetalCommandQueue, gpuQueue);
+	}
 	OfxStatus status = dispatch(kOfxImageEffectActionBeginSequenceRender, &seq, nullptr);
 	if (status != kOfxStatOK && status != kOfxStatReplyDefault) {
 		result.status = status;
@@ -1251,6 +1309,9 @@ RenderResult Instance::render(const RenderRequest& request)
 			task.tile = tiles[i];
 			task.renderScale = {sx, sy};
 			task.field = request.field;
+			task.gpu = result.gpu;
+			task.gpuOutput = gpuOutputHandle;
+			task.gpuInputs = &gpuInputHandles;
 			PropSet in;
 			in.setDouble(kOfxPropTime, request.time);
 			in.setDoubles(kOfxImageEffectPropRenderScale, {sx, sy});
@@ -1261,7 +1322,10 @@ RenderResult Instance::render(const RenderRequest& request)
 			in.setInt(kOfxImageEffectPropSequentialRenderStatus, 0);
 			in.setInt(kOfxImageEffectPropInteractiveRenderStatus, request.interactive ? 1 : 0);
 			in.setInt(kOfxImageEffectPropOpenGLEnabled, 0);
-			in.setInt(kOfxImageEffectPropMetalEnabled, 0);
+			in.setInt(kOfxImageEffectPropMetalEnabled, result.gpu == GpuApi::Metal ? 1 : 0);
+			if (result.gpu == GpuApi::Metal) {
+				in.setPointer(kOfxImageEffectPropMetalCommandQueue, gpuQueue);
+			}
 			in.setInt(kOfxImageEffectPropCudaEnabled, 0);
 			in.setInt(kOfxImageEffectPropOpenCLEnabled, 0);
 			currentTask = &task;
@@ -1284,6 +1348,16 @@ RenderResult Instance::render(const RenderRequest& request)
 	if (status != kOfxStatOK && status != kOfxStatReplyDefault) {
 		result.status = status;
 	}
+#if defined(OFXGRIP_HAS_METAL)
+	if (metalContext) {
+		// The plug-in commits without waiting (ofxGPURender.h); the host waits before it reads.
+		if (Error e = metalContext->waitIdle()) {
+			result.status = kOfxStatFailed;
+		} else {
+			std::memcpy(result.image.bytes().data(), metalOutput.contents(), result.image.bytes().size());
+		}
+	}
+#endif
 	return result;
 }
 

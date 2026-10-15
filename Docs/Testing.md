@@ -6,9 +6,10 @@ Four layers, as `Research/Comparison.md` §3.16 and D-004 lay out.
 
 | Layer | Where | What it covers |
 | --- | --- | --- |
-| Host-free unit tests | `tests/core/` | Every `core/` header: types, errors, values, flags, manifest and JSON, the event bus, extensions, the host profile and quirk table, the snapshot codec, images and bands |
+| Host-free unit tests | `tests/core/` | Every `core/` header: types, errors, values, the byte codec, flags, manifest and JSON (target presets, rules), the event bus, extensions, the host profile and quirk table, the snapshot codec, images and bands, the meta manager, the rule language, the parameter model, and the three framework extensions over `FakeServices.hpp` |
+| GPU backend tests | `tests/gpu/` (macOS) | The Metal backend on the system default device: compile, cache, dispatch, blit copy and fill, the scratch pool, error paths. Skipped without a device |
 | Adapter contract tests | `tests/ofx/` | Action decoding, property sets, descriptor lowering, and the whole adapter driven in process: a test effect registered with the `PluginRegistry` and run through the mini host (lifecycle events, parameter service and phases, persistence, snapshots, tiled and threaded render, identity, the Resolve profile's quirk paths) |
-| Artifact and bundle tests | `tests/integration/`, `scripts/validate-bundle.py` | The built `OfxGripGain` and `OfxGripHostDump` bundles loaded with `dlopen`, described, and rendered across depths, tiles, threads, and profiles; bundle layout, `Info.plist`, exports, architectures |
+| Artifact and bundle tests | `tests/integration/`, `scripts/validate-bundle.py` | The built `OfxGripGain` and `OfxGripHostDump` bundles loaded with `dlopen`, described, and rendered across depths, tiles, threads, and profiles, on CPU frames and on Metal frames (compared per pixel); bundle layout, `Info.plist`, exports, architectures |
 | Live probes | `plugins/HostDump`, `scripts/install-bundle.sh` | Run in DaVinci Resolve; results go into `Research/Host Quirks Registry.md` with host version, OS, and date |
 
 ## The mini host
@@ -34,6 +35,17 @@ what the registry reports today; the live probes refine it.
 A render through the mini host runs clip preferences, region of definition, is-identity, begin
 sequence render, one render action per tile on the requested number of threads, and end sequence
 render. Tiles really tile: the output image handed to each render covers only that tile.
+
+With `RenderRequest::gpu = GpuApi::Metal` on macOS, the mini host uploads the inputs to
+`MTLBuffer`s, allocates the output buffer, passes its own command queue in the render arguments,
+and reads the output back after the queue drains, as `ofxGPURender.h` describes. GPU frames cover
+the whole window and the render window selects the tile. The request falls back to CPU frames when
+the host options or the plug-in descriptor lack Metal, or no device exists; `RenderResult::gpu`
+says which happened.
+
+`MiniHost::createInstance` takes a `restore` callback that runs over the instantiated parameters
+before the create action, so a test can imitate a host restoring a saved document (the hidden
+state parameter, renamed parameters) and exercise migrations.
 
 ```bash
 build/debug/minihost/ofxgrip-minihost --bundle build/debug/plugins/Gain/OfxGripGain.ofx.bundle \

@@ -34,6 +34,9 @@ Effect::Effect() : bus_(std::make_unique<EventBus>()), extensions_(std::make_uni
 Effect::~Effect()
 {
 	extensions_->unloadAll();
+	metaExtension_ = nullptr;
+	visibilityExtension_ = nullptr;
+	versioningExtension_ = nullptr;
 }
 
 HostServices& Effect::services()
@@ -51,6 +54,10 @@ const EffectManifest& Effect::manifest() const
 
 void Effect::loadExtensions(ExtensionSystem&) {}
 Error Effect::onCreate()
+{
+	return Error::none();
+}
+Error Effect::onMigrate(unsigned, unsigned, Version)
 {
 	return Error::none();
 }
@@ -99,6 +106,51 @@ void Effect::attach(std::unique_ptr<OfxHostServices> services, const CreateInsta
 {
 	services_ = std::move(services);
 	services_->setResolvePage(args.resolvePage);
+	parameters_ = std::make_unique<ParameterModel>(services_->parameters());
+	loadFrameworkExtensions();
+}
+
+void Effect::loadFrameworkExtensions()
+{
+	const EffectManifest& m = services_->manifest();
+	auto enabled = [&m](const char* property) {
+		auto it = m.properties.find(property);
+		return it == m.properties.end() || it->second.toBool(true);
+	};
+	versioningExtension_ = static_cast<VersioningExtension*>(
+	    extensions_->load(std::make_unique<VersioningExtension>([this](unsigned from, unsigned to, Version fromVersion) { return onMigrate(from, to, fromVersion); })));
+	if (enabled("manageMeta")) {
+		metaExtension_ = static_cast<MetaExtension*>(extensions_->load(std::make_unique<MetaExtension>()));
+		if (metaExtension_ != nullptr) {
+			parameters_->setMetaManager(&metaExtension_->manager());
+		}
+	}
+	if (enabled("manageVisibility")) {
+		visibilityExtension_ = static_cast<VisibilityExtension*>(extensions_->load(std::make_unique<VisibilityExtension>()));
+	}
+}
+
+ParameterModel& Effect::parameters()
+{
+	if (!parameters_) {
+		throw OfxGripException(Error::make(ErrorCode::BadHandle, "The effect is not attached to a host"));
+	}
+	return *parameters_;
+}
+
+Parameter* Effect::param(ParameterId id)
+{
+	return parameters_ ? parameters_->find(id) : nullptr;
+}
+
+Parameter* Effect::param(std::string_view key)
+{
+	return parameters_ ? parameters_->find(key) : nullptr;
+}
+
+MetaManager* Effect::meta()
+{
+	return metaExtension_ == nullptr ? nullptr : &metaExtension_->manager();
 }
 
 RenderSnapshot Effect::buildSnapshot(const RenderInfo& info)

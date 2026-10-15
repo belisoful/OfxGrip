@@ -96,6 +96,8 @@ public:
 	virtual const ParameterSpec* spec(ParameterId id) const = 0;
 	/*! The ID for a key, or `kParameterIdNone`. */
 	virtual ParameterId idForKey(std::string_view key) const = 0;
+	/*! Every parameter the host holds for this instance, in declaration order. */
+	virtual std::vector<ParameterId> ids() const = 0;
 };
 
 /*! Keyed blobs that persist with the instance in the host document. The OFX adapter stores

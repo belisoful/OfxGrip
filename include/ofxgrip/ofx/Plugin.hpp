@@ -37,8 +37,10 @@ class PluginRegistry {
 public:
 	static PluginRegistry& instance();
 
-	/*! Registers a factory. Returns the slot index, or -1 when the table is full or the identifier
-	    is already registered. */
+	/*! Registers a factory. Returns the slot index of the current major version, or -1 when the
+	    table is full or the identifier is already registered. Each entry of the manifest's
+	    `deprecatedMajors` takes a further slot that shares the factory, so a host loads the
+	    plug-in record a saved project names (OpenFX keys plug-ins by identifier and major). */
 	int registerFactory(std::unique_ptr<EffectFactory> factory);
 	int count() const;
 	/*! The `OfxPlugin` for a slot, or null. */

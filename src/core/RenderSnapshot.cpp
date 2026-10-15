@@ -2,6 +2,8 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/core/RenderSnapshot.hpp>
 
+#include <ofxgrip/core/Codec.hpp>
+
 #include <cstring>
 
 OFXGRIP_NAMESPACE_BEGIN
@@ -18,251 +20,6 @@ namespace {
 //     End(0)
 constexpr char kMagic[4] = {'O', 'G', 'S', 'N'};
 enum Tag : std::uint8_t { TagEnd = 0, TagInfo = 1, TagLicense = 2, TagValue = 3, TagExtra = 4 };
-
-class Writer {
-public:
-	explicit Writer(Bytes& out) : out_(out) {}
-	void u8(std::uint8_t v) { out_.push_back(v); }
-	void u16(std::uint16_t v)
-	{
-		u8(static_cast<std::uint8_t>(v & 0xFF));
-		u8(static_cast<std::uint8_t>(v >> 8));
-	}
-	void u32(std::uint32_t v)
-	{
-		u16(static_cast<std::uint16_t>(v & 0xFFFF));
-		u16(static_cast<std::uint16_t>(v >> 16));
-	}
-	void i32(std::int32_t v) { u32(static_cast<std::uint32_t>(v)); }
-	void f64(double v)
-	{
-		std::uint64_t bits = 0;
-		std::memcpy(&bits, &v, sizeof bits);
-		u32(static_cast<std::uint32_t>(bits & 0xFFFFFFFFu));
-		u32(static_cast<std::uint32_t>(bits >> 32));
-	}
-	void str(std::string_view s)
-	{
-		u32(static_cast<std::uint32_t>(s.size()));
-		out_.insert(out_.end(), s.begin(), s.end());
-	}
-	void bytes(const Bytes& b)
-	{
-		u32(static_cast<std::uint32_t>(b.size()));
-		out_.insert(out_.end(), b.begin(), b.end());
-	}
-
-private:
-	Bytes& out_;
-};
-
-class Reader {
-public:
-	explicit Reader(std::span<const std::uint8_t> in) : in_(in) {}
-	bool u8(std::uint8_t& v)
-	{
-		if (pos_ + 1 > in_.size()) {
-			return false;
-		}
-		v = in_[pos_++];
-		return true;
-	}
-	bool u16(std::uint16_t& v)
-	{
-		std::uint8_t a = 0;
-		std::uint8_t b = 0;
-		if (!u8(a) || !u8(b)) {
-			return false;
-		}
-		v = static_cast<std::uint16_t>(a | (b << 8));
-		return true;
-	}
-	bool u32(std::uint32_t& v)
-	{
-		std::uint16_t a = 0;
-		std::uint16_t b = 0;
-		if (!u16(a) || !u16(b)) {
-			return false;
-		}
-		v = static_cast<std::uint32_t>(a) | (static_cast<std::uint32_t>(b) << 16);
-		return true;
-	}
-	bool i32(std::int32_t& v)
-	{
-		std::uint32_t u = 0;
-		if (!u32(u)) {
-			return false;
-		}
-		v = static_cast<std::int32_t>(u);
-		return true;
-	}
-	bool f64(double& v)
-	{
-		std::uint32_t lo = 0;
-		std::uint32_t hi = 0;
-		if (!u32(lo) || !u32(hi)) {
-			return false;
-		}
-		const std::uint64_t bits = static_cast<std::uint64_t>(lo) | (static_cast<std::uint64_t>(hi) << 32);
-		std::memcpy(&v, &bits, sizeof v);
-		return true;
-	}
-	bool str(std::string& s)
-	{
-		std::uint32_t n = 0;
-		if (!u32(n) || pos_ + n > in_.size()) {
-			return false;
-		}
-		s.assign(reinterpret_cast<const char*>(in_.data() + pos_), n);
-		pos_ += n;
-		return true;
-	}
-	bool bytes(Bytes& b)
-	{
-		std::uint32_t n = 0;
-		if (!u32(n) || pos_ + n > in_.size()) {
-			return false;
-		}
-		b.assign(in_.begin() + static_cast<std::ptrdiff_t>(pos_), in_.begin() + static_cast<std::ptrdiff_t>(pos_ + n));
-		pos_ += n;
-		return true;
-	}
-	bool done() const { return pos_ >= in_.size(); }
-
-private:
-	std::span<const std::uint8_t> in_;
-	std::size_t pos_{0};
-};
-
-void writeValue(Writer& w, const Value& v)
-{
-	w.u8(static_cast<std::uint8_t>(v.kind()));
-	switch (v.kind()) {
-	case ValueKind::Empty:
-		break;
-	case ValueKind::Bool:
-		w.u8(v.as<bool>() ? 1 : 0);
-		break;
-	case ValueKind::Int:
-		w.i32(v.as<int>());
-		break;
-	case ValueKind::Double:
-		w.f64(v.as<double>());
-		break;
-	case ValueKind::Point2D:
-		w.f64(v.as<Point2D>().x);
-		w.f64(v.as<Point2D>().y);
-		break;
-	case ValueKind::Point3D:
-		w.f64(v.as<Point3D>().x);
-		w.f64(v.as<Point3D>().y);
-		w.f64(v.as<Point3D>().z);
-		break;
-	case ValueKind::RGB:
-		w.f64(v.as<RGB>().r);
-		w.f64(v.as<RGB>().g);
-		w.f64(v.as<RGB>().b);
-		break;
-	case ValueKind::RGBA:
-		w.f64(v.as<RGBA>().r);
-		w.f64(v.as<RGBA>().g);
-		w.f64(v.as<RGBA>().b);
-		w.f64(v.as<RGBA>().a);
-		break;
-	case ValueKind::String:
-		w.str(v.as<std::string>());
-		break;
-	case ValueKind::Blob:
-		w.bytes(v.as<Bytes>());
-		break;
-	}
-}
-
-bool readValue(Reader& r, Value& out)
-{
-	std::uint8_t kind = 0;
-	if (!r.u8(kind)) {
-		return false;
-	}
-	switch (static_cast<ValueKind>(kind)) {
-	case ValueKind::Empty:
-		out = Value();
-		return true;
-	case ValueKind::Bool: {
-		std::uint8_t b = 0;
-		if (!r.u8(b)) {
-			return false;
-		}
-		out = Value(b != 0);
-		return true;
-	}
-	case ValueKind::Int: {
-		std::int32_t i = 0;
-		if (!r.i32(i)) {
-			return false;
-		}
-		out = Value(static_cast<int>(i));
-		return true;
-	}
-	case ValueKind::Double: {
-		double d = 0;
-		if (!r.f64(d)) {
-			return false;
-		}
-		out = Value(d);
-		return true;
-	}
-	case ValueKind::Point2D: {
-		Point2D p;
-		if (!r.f64(p.x) || !r.f64(p.y)) {
-			return false;
-		}
-		out = Value(p);
-		return true;
-	}
-	case ValueKind::Point3D: {
-		Point3D p;
-		if (!r.f64(p.x) || !r.f64(p.y) || !r.f64(p.z)) {
-			return false;
-		}
-		out = Value(p);
-		return true;
-	}
-	case ValueKind::RGB: {
-		RGB c;
-		if (!r.f64(c.r) || !r.f64(c.g) || !r.f64(c.b)) {
-			return false;
-		}
-		out = Value(c);
-		return true;
-	}
-	case ValueKind::RGBA: {
-		RGBA c;
-		if (!r.f64(c.r) || !r.f64(c.g) || !r.f64(c.b) || !r.f64(c.a)) {
-			return false;
-		}
-		out = Value(c);
-		return true;
-	}
-	case ValueKind::String: {
-		std::string s;
-		if (!r.str(s)) {
-			return false;
-		}
-		out = Value(std::move(s));
-		return true;
-	}
-	case ValueKind::Blob: {
-		Bytes b;
-		if (!r.bytes(b)) {
-			return false;
-		}
-		out = Value(std::move(b));
-		return true;
-	}
-	}
-	return false;
-}
 
 }  // namespace
 
@@ -356,7 +113,7 @@ const Bytes* RenderSnapshot::extra(std::string_view key) const noexcept
 Bytes RenderSnapshot::encode() const
 {
 	Bytes out;
-	Writer w(out);
+	ByteWriter w(out);
 	out.insert(out.end(), kMagic, kMagic + 4);
 	w.u16(kCodecVersion);
 	w.u16(0);
@@ -405,7 +162,7 @@ Error RenderSnapshot::decode(std::span<const std::uint8_t> bytes, RenderSnapshot
 	if (bytes.size() < 8 || std::memcmp(bytes.data(), kMagic, 4) != 0) {
 		return fail("bad magic");
 	}
-	Reader r(bytes.subspan(4));
+	ByteReader r(bytes.subspan(4));
 	std::uint16_t version = 0;
 	std::uint16_t reserved = 0;
 	if (!r.u16(version) || !r.u16(reserved)) {
