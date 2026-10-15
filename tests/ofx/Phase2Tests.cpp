@@ -8,6 +8,8 @@
 
 #include "ofxParam.h"
 
+#include "../TestEnvironment.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cstring>
@@ -16,6 +18,7 @@
 
 using namespace ofxgrip;
 using namespace ofxgrip::minihost;
+using namespace ofxgrip::testing;
 
 namespace {
 
@@ -194,8 +197,8 @@ protected:
 
 TEST_F(Phase2, LowersTheControlVocabularyToStandardParameters)
 {
-	unsetenv("OFXGRIP_LANGUAGE");
-	setenv("LANG", "C", 1);
+	unsetTestEnv("OFXGRIP_LANGUAGE");
+	setTestEnv("LANG", "C");
 	start();
 	const ParamSet* params = host_->contextParams(kOfxImageEffectContextFilter);
 	ASSERT_NE(params, nullptr);
@@ -251,7 +254,7 @@ TEST_F(Phase2, LowersTheControlVocabularyToStandardParameters)
 
 TEST_F(Phase2, PresetsControlAppliesManifestAndBundlePresets)
 {
-	setenv("LANG", "C", 1);
+	setTestEnv("LANG", "C");
 	start();
 	Effect& e = *effect();
 	ASSERT_NE(e.presetsExtension(), nullptr);
@@ -287,7 +290,7 @@ TEST_F(Phase2, PresetsControlAppliesManifestAndBundlePresets)
 
 TEST_F(Phase2, MenusAndTrackersRunThroughTheHost)
 {
-	setenv("LANG", "C", 1);
+	setTestEnv("LANG", "C");
 	start();
 	Effect& e = *effect();
 	ASSERT_NE(e.aboutExtension(), nullptr);
@@ -335,7 +338,7 @@ TEST_F(Phase2, DebugMenuIsAbsentWhenTheFactoryForbidsIt)
 	PluginRegistry::instance().clear();
 	index_ = PluginRegistry::instance().registerFactory(std::make_unique<LockedFactory>(phase2Manifest()));
 	ASSERT_GE(index_, 0);
-	setenv("LANG", "C", 1);
+	setTestEnv("LANG", "C");
 	start();
 	EXPECT_EQ(host_->contextParams(kOfxImageEffectContextFilter)->find(kDebugMenuParameterKey), nullptr);
 	EXPECT_EQ(effect()->debugExtension(), nullptr);
@@ -344,7 +347,7 @@ TEST_F(Phase2, DebugMenuIsAbsentWhenTheFactoryForbidsIt)
 
 TEST_F(Phase2, AnalysisPassStoresRecordsPerFrame)
 {
-	setenv("LANG", "C", 1);
+	setTestEnv("LANG", "C");
 	start();
 	Effect& e = *effect();
 	ASSERT_NE(e.analysisExtension(), nullptr);
@@ -399,9 +402,9 @@ TEST_F(Phase2, AnalysisPassStoresRecordsPerFrame)
 
 TEST_F(Phase2, DescribeTimeLocalizationUsesTheBundleTable)
 {
-	setenv("OFXGRIP_LANGUAGE", "de", 1);
+	setTestEnv("OFXGRIP_LANGUAGE", "de");
 	start();
-	unsetenv("OFXGRIP_LANGUAGE");
+	unsetTestEnv("OFXGRIP_LANGUAGE");
 	const ParamSet* params = host_->contextParams(kOfxImageEffectContextFilter);
 	EXPECT_EQ(params->find("amount")->props().getString(kOfxPropLabel), "Menge");
 	EXPECT_EQ(params->find("mode")->props().getStrings(kOfxParamPropChoiceOption)[0], "Weich");
@@ -414,9 +417,9 @@ TEST_F(Phase2, DescribeTimeLocalizationUsesTheBundleTable)
 	// An effect without the table in its bundle loads no extension.
 	instance_.reset();
 	host_.reset();
-	setenv("OFXGRIP_LANGUAGE", "de", 1);
+	setTestEnv("OFXGRIP_LANGUAGE", "de");
 	start(HostOptions::spec(), "/tmp/no-such.ofx.bundle");
-	unsetenv("OFXGRIP_LANGUAGE");
+	unsetTestEnv("OFXGRIP_LANGUAGE");
 	EXPECT_EQ(effect()->i18nExtension(), nullptr);
 	EXPECT_EQ(host_->contextParams(kOfxImageEffectContextFilter)->find("amount")->props().getString(kOfxPropLabel), "Amount");
 }

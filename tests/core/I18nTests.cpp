@@ -4,6 +4,8 @@
 
 #include "FakeServices.hpp"
 
+#include "../TestEnvironment.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -91,13 +93,13 @@ TEST(StringTable, FindsTheBundleTableByLanguage)
 	const std::vector<std::string> languages = preferredLanguages();
 	EXPECT_FALSE(languages.empty());
 	EXPECT_EQ(languages.back(), "en");
-	setenv("OFXGRIP_LANGUAGE", "de_DE.UTF-8", 1);
-	setenv("LC_ALL", "C", 1);
+	setTestEnv("OFXGRIP_LANGUAGE", "de_DE.UTF-8");
+	setTestEnv("LC_ALL", "C");
 	const std::vector<std::string> withOverride = preferredLanguages();
 	EXPECT_EQ(withOverride.front(), "de");
 	EXPECT_EQ(std::count(withOverride.begin(), withOverride.end(), "C"), 0);
-	unsetenv("OFXGRIP_LANGUAGE");
-	unsetenv("LC_ALL");
+	unsetTestEnv("OFXGRIP_LANGUAGE");
+	unsetTestEnv("LC_ALL");
 }
 
 TEST(I18n, LocalizesTheManifestAndRuntimeTraffic)
