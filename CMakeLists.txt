@@ -13,6 +13,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 option(OFXGRIP_BUILD_TESTS "Build the test suite" ON)
 option(OFXGRIP_BUILD_PLUGINS "Build the probe and sample plug-ins" ON)
 option(OFXGRIP_BUILD_MINIHOST "Build the headless mini host" ON)
+option(OFXGRIP_BUILD_RUST "Build the Rust crates and the Rust sample bundle with cargo" OFF)
 option(OFXGRIP_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(OFXGRIP_COVERAGE "Instrument for source-based coverage (clang)" OFF)
 set(OFXGRIP_SANITIZER "" CACHE STRING "Sanitizers to enable: address, thread, undefined (semicolon separated)")
@@ -43,6 +44,10 @@ endif()
 
 if(OFXGRIP_BUILD_PLUGINS)
   add_subdirectory(plugins)
+endif()
+
+if(OFXGRIP_BUILD_RUST)
+  include(OfxGripRust)
 endif()
 
 if(OFXGRIP_BUILD_TESTS)

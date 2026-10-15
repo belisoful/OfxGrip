@@ -54,9 +54,12 @@ private:
     on Windows, `$XDG_STATE_HOME/ofxgrip/log` or `~/.local/state/ofxgrip/log` on Linux. The
     `OFXGRIP_LOG_DIR` environment variable, read once at load, overrides it for tests and tools. */
 std::filesystem::path defaultLogDirectory();
-/*! The per-OS cache directory for a plug-in identifier. */
+/*! The per-OS cache directory for a plug-in identifier (`~/Library/Caches/OfxGrip/<id>` on
+    macOS). `OFXGRIP_CACHE_DIR` overrides the root for tests and tools. */
 std::filesystem::path defaultCacheDirectory(std::string_view pluginId);
-/*! The per-OS user support directory for a plug-in identifier, where user presets live. */
+/*! The per-OS user support directory for a plug-in identifier, where user presets live
+    (`~/Library/Application Support/OfxGrip/<id>` on macOS). `OFXGRIP_SUPPORT_DIR` overrides
+    the root. */
 std::filesystem::path defaultUserSupportDirectory(std::string_view pluginId);
 
 /*! One bound parameter. */
@@ -119,6 +122,10 @@ public:
 	/*! The Resolve page the instance was created on, or empty. */
 	const std::string& resolvePage() const noexcept { return resolvePage_; }
 	void setResolvePage(std::string page) { resolvePage_ = std::move(page); }
+	/*! Whether the factory allows debug features; decides whether the debug menu binds. Set
+	    before `bind`. */
+	void setDebugFeaturesAllowed(bool allowed) noexcept { debugAllowed_ = allowed; }
+	bool debugFeaturesAllowed() const noexcept { return debugAllowed_; }
 
 private:
 	struct Impl;
@@ -136,6 +143,7 @@ private:
 	std::map<std::string, ParameterId> idsByKey_;
 	std::map<std::string, OfxImageClipHandle> clips_;
 	std::string resolvePage_;
+	bool debugAllowed_{true};
 	std::unique_ptr<Impl> impl_;
 };
 

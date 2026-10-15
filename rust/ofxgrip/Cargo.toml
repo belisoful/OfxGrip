@@ -1,0 +1,12 @@
+[package]
+name = "ofxgrip"
+description = "Write OpenFX image-effect plug-ins in Rust on the OfxGrip framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ofxgrip-sys = { path = "../ofxgrip-sys", version = "0.3.0" }

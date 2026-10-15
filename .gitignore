@@ -1,6 +1,7 @@
 # Build output
 build/
 out/
+rust/target/
 *.profraw
 *.profdata
 coverage/

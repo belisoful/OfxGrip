@@ -166,7 +166,7 @@ Error VisibilityExtension::apply(const Entry& entry)
 			return e;
 		}
 		if (secretIsPermanent_) {
-			// Q-NUKE-003: the secret flag cannot change after describe; disable instead.
+			// Q-NUKE-010: the secret flag cannot change after describe; disable instead.
 			enabled = enabled && visible;
 		} else {
 			updated.set(HostFlag::Hidden, !visible);

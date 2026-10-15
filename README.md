@@ -13,13 +13,15 @@ OfxGrip is a C++20 framework for OpenFX image-effect plug-ins. It is the OpenFX 
 - **An extension bus.** Lifecycle events for every OpenFX action and API-traffic events around every parameter read and write, delivered in priority order, with veto and override.
 - **A host quirks registry.** Host behavior is asked for by key (`profile.has(Quirk::MaskAlwaysConnected)`), never by host name. Probed capabilities override the table.
 - **A parameter model with tags, meta, rules, and target presets.** `effect["gain"]->number(t)` reads through the host; tags and meta persist with the document; `visibleWhen` and `enabledWhen` rules and menu-driven target presets rig the inspector without code; a stored schema version drives migrations.
+- **Presets, analysis, and inspector controls.** `.fxpreset` files interoperate with FxFactory and FxGrip; a presets control lists built-in, bundled, and user presets; an analysis pass stores a record per frame with disk spill; sections, banners, status lines, and the About and Debug menus lower to standard OpenFX parameters.
+- **A C contract and a Rust crate.** `ofxgrip_c.h` exposes the manifest, the callbacks, the render context, and the services to any language; the `ofxgrip` crate wraps it so a Rust effect is an OfxGrip effect (`rust/examples/gain-rs`).
 - **A Metal backend.** Kernels run on the host's command queue over the host's `MTLBuffer` frames through metal-cpp, with a pipeline cache and a scratch pool per queue. No Objective-C in the plug-in.
 - **A headless mini host.** Loads real bundles, runs the real action order, tiles, varies render scale and bit depth, renders concurrently, hands out CPU or Metal frames, and imitates a named host's quirk profile. CI runs it with sanitizers and a coverage gate.
 - **Probe and sample plug-ins.** `HostDump` records what a host really does; `Gain` shows an effect built on the framework.
 
 ## Status
 
-Phase 1 (parameter model, meta and tags, rules, versioning, Metal). See `Docs/Plan.md` for the phases and what each ports from FxGrip.
+Phase 2 (presets, analysis, controls, the extensions, the C contract and Rust crates). See `Docs/Plan.md` for the phases and what each ports from FxGrip.
 
 ## Requirements
 
@@ -35,7 +37,34 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-`cmake --list-presets` shows the sanitizer, coverage, x86_64, and release presets.
+`cmake --list-presets` shows the sanitizer, coverage, x86_64, and release presets. Add
+`-DOFXGRIP_BUILD_RUST=ON` to build the Rust crates and the Rust sample bundle with cargo.
+
+## Writing an effect in Rust
+
+```rust
+use ofxgrip::{bundle, Effect, Manifest, RenderContext, Result, Services};
+
+struct Invert;
+impl Effect for Invert {
+    fn render(&mut self, ctx: &mut RenderContext) -> Result<()> {
+        let out = ctx.output();
+        let src = ctx.source().filter(|i| i.connected);
+        let (x1, y1, x2, y2) = ctx.args().window;
+        for y in y1..y2 { for x in x1..x2 { for c in 0..out.components().count() {
+            let v = src.as_ref().map(|i| i.image.read(x, y, c)).unwrap_or(0.0);
+            out.write(x, y, c, if c == 3 { v } else { 1.0 - v });
+        }}}
+        Ok(())
+    }
+}
+
+fn register() {
+    let manifest = Manifest::new("com.example.invert", "Invert");
+    let _ = ofxgrip::register(manifest, |_: &mut Services| Invert);
+}
+bundle!(register);
+```
 
 ## Testing in DaVinci Resolve
 

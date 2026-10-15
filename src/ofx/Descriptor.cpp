@@ -2,6 +2,10 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/ofx/Descriptor.hpp>
 
+#include <ofxgrip/core/About.hpp>
+#include <ofxgrip/core/Debug.hpp>
+#include <ofxgrip/core/Presets.hpp>
+
 #include <ofxgrip/ofx/Actions.hpp>
 #include <ofxgrip/ofx/PropertySet.hpp>
 #include <ofxgrip/ofx/ResolveExtensions.hpp>
@@ -166,7 +170,14 @@ Error lowerNumericRanges(const ParameterSpec& spec, const PropertySet& props, bo
 
 Error lowerDefault(const ParameterSpec& spec, const PropertySet& props, const char* ofxType)
 {
-	const Value& v = spec.defaultValue;
+	Value controlDefault;
+	if (spec.type == ParameterType::Banner && spec.defaultValue.empty()) {
+		auto title = spec.meta.find("title");
+		controlDefault = Value(title != spec.meta.end() ? (title->second.is<std::string>() ? title->second.as<std::string>() : title->second.toString()) : spec.label);
+	} else if (spec.type == ParameterType::Divider && spec.defaultValue.empty()) {
+		controlDefault = Value("\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80");
+	}
+	const Value& v = controlDefault.empty() ? spec.defaultValue : controlDefault;
 	const std::string type(ofxType);
 	if (type == kOfxParamTypeDouble) {
 		return props.setDouble(kOfxParamPropDefault, v.toDouble(0.0));
@@ -277,12 +288,20 @@ std::string sanitizeLabel(const std::string& text, bool strict)
 	return out;
 }
 
-std::vector<ParameterSpec> frameworkParameters()
+std::vector<ParameterSpec> frameworkParameters(const EffectManifest& manifest, bool debugAllowed)
 {
+	std::vector<ParameterSpec> out;
+	if (!manifest.about.empty()) {
+		out.push_back(aboutMenuParameter(manifest.about, kParameterIdAboutMenu, kAboutMenuParameterKey));
+	}
+	if (debugAllowed && manifest.property("debugMenu", false)) {
+		out.push_back(debugMenuParameter(kParameterIdDebugMenu, kDebugMenuParameterKey));
+	}
 	ParameterSpec state = ParameterSpec::stringParam(kParameterIdInstanceState, kInstanceStateParameterKey, "OfxGrip State", "");
 	state.hostFlags = HostFlag::Hidden | HostFlag::NotAnimatable | HostFlag::NoEvaluateOnChange | HostFlag::NoUndo;
 	state.appFlags = AppFlag::NoState | AppFlag::PresetNoValue | AppFlag::PresetNoTags | AppFlag::PresetNoMeta;
-	return {state};
+	out.push_back(std::move(state));
+	return out;
 }
 
 Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, LoweringReport& report)
@@ -344,7 +363,7 @@ Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& p
 	return Error::none();
 }
 
-Error lowerContextDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, EffectKind context, LoweringReport& report)
+Error lowerContextDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, EffectKind context, LoweringReport& report, const LoweringContext& lowering)
 {
 	const bool generator = context == EffectKind::Generator;
 	std::vector<ClipSpec> clips = generator ? std::vector<ClipSpec>{} : manifest.effectiveClips();
@@ -386,7 +405,7 @@ Error lowerContextDescriptor(const EffectManifest& manifest, const HostProfile& 
 	}
 
 	std::vector<ParameterSpec> flat = manifest.flattenedParameters();
-	for (ParameterSpec& extra : frameworkParameters()) {
+	for (ParameterSpec& extra : frameworkParameters(manifest, lowering.debugAllowed)) {
 		flat.push_back(std::move(extra));
 	}
 	std::map<ParameterId, std::string> keysById;
@@ -424,8 +443,12 @@ Error lowerContextDescriptor(const EffectManifest& manifest, const HostProfile& 
 		} else {
 			topLevel.push_back(spec.key);
 		}
-		props.trySetInt(kOfxParamPropSecret, spec.hostFlags.has(HostFlag::Hidden) ? 1 : 0, &report.rejectedProperties);
-		props.trySetInt(kOfxParamPropEnabled, spec.hostFlags.has(HostFlag::Disabled) ? 0 : 1, &report.rejectedProperties);
+		// A parameter shown only in debug mode starts hidden; the debug menu reveals it.
+		const bool hidden = spec.hostFlags.has(HostFlag::Hidden) || spec.appFlags.has(AppFlag::InDebugMode);
+		// Display-only controls lower to disabled standard parameters the effect writes into.
+		const bool displayOnly = spec.type == ParameterType::Status || spec.type == ParameterType::Capsule || spec.type == ParameterType::Progress || spec.type == ParameterType::Banner || spec.type == ParameterType::Divider;
+		props.trySetInt(kOfxParamPropSecret, hidden ? 1 : 0, &report.rejectedProperties);
+		props.trySetInt(kOfxParamPropEnabled, spec.hostFlags.has(HostFlag::Disabled) || displayOnly ? 0 : 1, &report.rejectedProperties);
 		// Q-RESOLVE-015: `animates` is written for every parameter.
 		props.trySetInt(kOfxParamPropAnimates, animatesOnHost(spec, profile) ? 1 : 0, &report.rejectedProperties);
 		props.trySetInt(kOfxParamPropPersistant, spec.hostFlags.has(HostFlag::DontSave) ? 0 : 1, &report.rejectedProperties);
@@ -455,18 +478,29 @@ Error lowerContextDescriptor(const EffectManifest& manifest, const HostProfile& 
 				return e;
 			}
 		} else if (type == kOfxParamTypeChoice) {
+			std::vector<ChoiceOption> options = spec.options;
+			if (spec.type == ParameterType::Presets) {
+				// The menu lists the presets present now; a host that freezes options after
+				// describe (Q-RESOLVE-021) shows new user presets after a restart.
+				options = presetMenuOptions(presetMenuEntriesForTag(manifest, lowering.bundlePath, lowering.userSupportDirectory, spec.tags.empty() ? std::string() : spec.tags.front()));
+			}
 			std::vector<std::string> labels;
-			for (const ChoiceOption& o : spec.options) {
+			for (const ChoiceOption& o : options) {
 				labels.push_back(sanitizeLabel(o.label.empty() ? o.key : o.label, true));
 			}
 			if (Error e = props.setStrings(kOfxParamPropChoiceOption, labels)) {
 				return e;
 			}
 		} else if (type == kOfxParamTypeGroup) {
-			props.trySetInt(kOfxParamPropGroupOpen, spec.hostFlags.has(HostFlag::Collapsed) ? 0 : 1, &report.rejectedProperties);
+			// A section is an open group with its title as the label.
+			const bool open = spec.type == ParameterType::Section || !spec.hostFlags.has(HostFlag::Collapsed);
+			props.trySetInt(kOfxParamPropGroupOpen, open ? 1 : 0, &report.rejectedProperties);
 		} else if (type == kOfxParamTypeString) {
 			const bool multiline = spec.meta.count("multiline") != 0 && spec.meta.at("multiline").toBool(false);
-			props.trySetString(kOfxParamPropStringMode, multiline ? kOfxParamStringIsMultiLine : kOfxParamStringIsSingleLine, &report.rejectedProperties);
+			// Banners and dividers are static text: label mode where the host keeps it
+			// (Q-NUKE-009 hosts fall back to a disabled single-line field).
+			const bool label = (spec.type == ParameterType::Banner || spec.type == ParameterType::Divider) && !profile.has(Quirk::LabelStringNotPersistent);
+			props.trySetString(kOfxParamPropStringMode, label ? kOfxParamStringIsLabel : (multiline ? kOfxParamStringIsMultiLine : kOfxParamStringIsSingleLine), &report.rejectedProperties);
 		}
 		if (Error e = lowerDefault(spec, props, ofxType)) {
 			return e;

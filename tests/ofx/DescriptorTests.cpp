@@ -44,7 +44,7 @@ TEST(Descriptor, SanitizesLabels)
 
 TEST(Descriptor, FrameworkParametersAreHiddenState)
 {
-	const std::vector<ParameterSpec> extras = frameworkParameters();
+	const std::vector<ParameterSpec> extras = frameworkParameters(EffectManifest{});
 	ASSERT_EQ(extras.size(), 1u);
 	EXPECT_EQ(extras[0].id, kParameterIdInstanceState);
 	EXPECT_EQ(extras[0].key, kInstanceStateParameterKey);

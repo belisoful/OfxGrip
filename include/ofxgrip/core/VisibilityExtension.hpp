@@ -7,7 +7,7 @@
 
 	Introduced in OfxGrip 0.2.0. The rules evaluate on creation, on every change of a parameter a
 	rule references, and on `SyncPrivateData`, as `Research/Comparison.md` §5.4 lays out for OFX.
-	On a host where `Secret` is permanent after describe (Q-NUKE-003), a visibility rule lowers to
+	On a host where `Secret` is permanent after describe (Q-NUKE-010), a visibility rule lowers to
 	the enabled flag instead.
 */
 #pragma once

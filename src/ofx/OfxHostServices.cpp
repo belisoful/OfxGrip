@@ -4,9 +4,21 @@
 
 #include <ofxgrip/ofx/Actions.hpp>
 #include <ofxgrip/ofx/Descriptor.hpp>
+#include <ofxgrip/core/Plist.hpp>
 
 #include "ofxImageEffect.h"
 #include "ofxParam.h"
+
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#include <shellapi.h>
+#else
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;  // NOLINT(bugprone-reserved-identifier)
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -77,6 +89,10 @@ std::filesystem::path defaultLogDirectory()
 
 std::filesystem::path defaultCacheDirectory(std::string_view pluginId)
 {
+	// An override for tests and tooling, as with the log directory.
+	if (const char* override = std::getenv("OFXGRIP_CACHE_DIR"); override != nullptr && *override != '\0') {
+		return ensure(std::filesystem::path(override) / safeName(pluginId));
+	}
 #if defined(__APPLE__)
 	return ensure(homeDirectory() / "Library" / "Caches" / "OfxGrip" / safeName(pluginId));
 #elif defined(_WIN32)
@@ -94,6 +110,9 @@ std::filesystem::path defaultCacheDirectory(std::string_view pluginId)
 
 std::filesystem::path defaultUserSupportDirectory(std::string_view pluginId)
 {
+	if (const char* override = std::getenv("OFXGRIP_SUPPORT_DIR"); override != nullptr && *override != '\0') {
+		return ensure(std::filesystem::path(override) / safeName(pluginId));
+	}
 #if defined(__APPLE__)
 	return ensure(homeDirectory() / "Library" / "Application Support" / "OfxGrip" / safeName(pluginId));
 #elif defined(_WIN32)
@@ -157,62 +176,9 @@ void FileLogger::log(LogLevel level, std::string_view message)
 	}
 }
 
-// ---- base64 for the hidden state parameter -------------------------------------------------------
+// ---- the hidden state parameter ------------------------------------------------------------------
 
 namespace {
-
-const char kBase64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-std::string base64Encode(const Bytes& in)
-{
-	std::string out;
-	out.reserve((in.size() + 2) / 3 * 4);
-	std::size_t i = 0;
-	while (i + 2 < in.size()) {
-		const std::uint32_t v = (static_cast<std::uint32_t>(in[i]) << 16) | (static_cast<std::uint32_t>(in[i + 1]) << 8) | in[i + 2];
-		out.push_back(kBase64[(v >> 18) & 63]);
-		out.push_back(kBase64[(v >> 12) & 63]);
-		out.push_back(kBase64[(v >> 6) & 63]);
-		out.push_back(kBase64[v & 63]);
-		i += 3;
-	}
-	if (i + 1 == in.size()) {
-		const std::uint32_t v = static_cast<std::uint32_t>(in[i]) << 16;
-		out.push_back(kBase64[(v >> 18) & 63]);
-		out.push_back(kBase64[(v >> 12) & 63]);
-		out += "==";
-	} else if (i + 2 == in.size()) {
-		const std::uint32_t v = (static_cast<std::uint32_t>(in[i]) << 16) | (static_cast<std::uint32_t>(in[i + 1]) << 8);
-		out.push_back(kBase64[(v >> 18) & 63]);
-		out.push_back(kBase64[(v >> 12) & 63]);
-		out.push_back(kBase64[(v >> 6) & 63]);
-		out.push_back('=');
-	}
-	return out;
-}
-
-bool base64Decode(std::string_view in, Bytes& out)
-{
-	out.clear();
-	std::uint32_t buffer = 0;
-	int bits = 0;
-	for (char c : in) {
-		if (c == '=') {
-			break;
-		}
-		const char* p = std::char_traits<char>::find(kBase64, 64, c);
-		if (p == nullptr) {
-			return false;
-		}
-		buffer = (buffer << 6) | static_cast<std::uint32_t>(p - kBase64);
-		bits += 6;
-		if (bits >= 8) {
-			bits -= 8;
-			out.push_back(static_cast<std::uint8_t>((buffer >> bits) & 0xFF));
-		}
-	}
-	return true;
-}
 
 constexpr const char* kStatePrefix = "OGST1:";
 
@@ -965,8 +931,11 @@ struct OfxHostServices::Impl {
 		std::filesystem::path cacheDirectory() override { return defaultCacheDirectory(outer_.identity().pluginId); }
 		std::filesystem::path userSupportDirectory() override { return defaultUserSupportDirectory(outer_.identity().pluginId); }
 		std::filesystem::path logDirectory() override { return defaultLogDirectory(); }
+		bool openUrl(std::string_view url) override { return launch(std::string(url), false); }
+		bool reveal(const std::filesystem::path& path) override { return launch(path.string(), true); }
 
 	private:
+		static bool launch(const std::string& target, bool isPath);
 		OfxHostServices& outer_;
 	};
 
@@ -979,6 +948,44 @@ struct OfxHostServices::Impl {
 };
 
 thread_local bool OfxHostServices::Impl::Threads::spawned_ = false;
+
+bool OfxHostServices::Impl::Paths::launch(const std::string& target, bool isPath)
+{
+	if (target.empty()) {
+		return false;
+	}
+#if defined(_WIN32)
+	const std::wstring wide(target.begin(), target.end());
+	return reinterpret_cast<std::intptr_t>(ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+#else
+	// posix_spawn, never a shell: the target is passed as one argument, so no quoting applies.
+#if defined(__APPLE__)
+	const char* program = "/usr/bin/open";
+	std::vector<std::string> args{program};
+	if (isPath) {
+		args.emplace_back("-R");
+	}
+#else
+	const char* program = "xdg-open";
+	std::vector<std::string> args{program};
+	(void)isPath;
+#endif
+	args.push_back(target);
+	std::vector<char*> argv;
+	for (std::string& a : args) {
+		argv.push_back(a.data());
+	}
+	argv.push_back(nullptr);
+	pid_t pid = 0;
+	const int result = posix_spawnp(&pid, program, nullptr, nullptr, argv.data(), environ);
+	if (result != 0) {
+		return false;
+	}
+	int status = 0;
+	waitpid(pid, &status, 0);
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
+}
 thread_local Phase OfxHostServices::threadPhase_ = Phase::None;
 
 // ---- OfxHostServices ----------------------------------------------------------------------------
@@ -1071,7 +1078,7 @@ Error OfxHostServices::bind()
 	orderedIds_.clear();
 	idsByKey_.clear();
 	std::vector<ParameterSpec> flat = manifest_.flattenedParameters();
-	for (ParameterSpec& extra : frameworkParameters()) {
+	for (ParameterSpec& extra : frameworkParameters(manifest_, debugAllowed_)) {
 		flat.push_back(std::move(extra));
 	}
 	for (ParameterSpec& spec : flat) {

@@ -1,0 +1,17 @@
+[package]
+name = "ofxgrip-gain-rs"
+description = "The OfxGrip gain effect written in Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "OfxGripGainRs"
+crate-type = ["cdylib"]
+
+[dependencies]
+ofxgrip = { path = "../../ofxgrip" }

@@ -544,7 +544,41 @@ Error EffectManifest::validate() const
 			return fail("A migration must come from an older schema version", nullptr);
 		}
 	}
+	for (const ManifestPreset& preset : presets) {
+		if (preset.name.empty()) {
+			return fail("A manifest preset has no name", nullptr);
+		}
+		for (const auto& [key, value] : preset.values) {
+			if (keys.count(key) == 0) {
+				return fail("The preset " + preset.name + " names an undeclared parameter " + key, nullptr);
+			}
+		}
+		for (const auto& [key, list] : preset.tags) {
+			if (keys.count(key) == 0) {
+				return fail("The preset " + preset.name + " names an undeclared parameter " + key, nullptr);
+			}
+		}
+		for (const auto& [key, entries] : preset.meta) {
+			if (keys.count(key) == 0) {
+				return fail("The preset " + preset.name + " names an undeclared parameter " + key, nullptr);
+			}
+		}
+	}
+	for (const AboutEntry& entry : about.entries) {
+		if (entry.kind == AboutEntry::Kind::Link && entry.url.empty()) {
+			return fail("An About link has no URL", nullptr);
+		}
+		if (entry.kind != AboutEntry::Kind::Separator && entry.label.empty()) {
+			return fail("An About row has no label", nullptr);
+		}
+	}
 	return Error::none();
+}
+
+bool EffectManifest::property(std::string_view name, bool fallback) const
+{
+	auto it = properties.find(std::string(name));
+	return it == properties.end() ? fallback : it->second.toBool(fallback);
 }
 
 std::vector<ParameterSpec> EffectManifest::flattenedParameters() const

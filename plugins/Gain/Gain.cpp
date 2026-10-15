@@ -45,7 +45,7 @@ EffectManifest makeManifest()
 	m.identity.description = "Multiplies each channel by a gain. The OfxGrip sample effect.";
 	m.identity.kind = EffectKind::Filter;
 	m.identity.extraContexts = {EffectKind::General};
-	m.version = Version{1, 1, 0};
+	m.version = Version{1, 2, 0};
 	m.capabilities.supportsTiles = true;
 	m.capabilities.supportsMultiResolution = true;
 	m.capabilities.noSpatialAwareness = true;

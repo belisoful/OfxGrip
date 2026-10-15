@@ -230,6 +230,8 @@ struct EffectIdentity {
 	std::string shortName;
 	std::string grouping;                  /*!< The menu group, for example `"OfxGrip"`. */
 	std::string description;
+	std::string author;                    /*!< Written into presets as the plug-in author. */
+	std::string productId;                 /*!< Written into presets as the product ID. */
 	EffectKind kind{EffectKind::Filter};
 	std::vector<EffectKind> extraContexts; /*!< Further OFX contexts the effect also supports. */
 	bool operator==(const EffectIdentity&) const = default;
@@ -245,6 +247,37 @@ struct Migration {
 	bool operator==(const Migration&) const = default;
 };
 
+/*! A preset declared in the manifest, keyed by parameter key. Resolved to a `Preset` by ID at
+    runtime. The tag names the presets control it lists under. */
+struct ManifestPreset {
+	std::string name;
+	std::string tag;
+	std::map<std::string, Value> values;
+	std::map<std::string, std::vector<std::string>> tags;
+	std::map<std::string, std::map<std::string, Value>> meta;
+	bool operator==(const ManifestPreset&) const = default;
+};
+
+/*! One row of the About menu. */
+struct AboutEntry {
+	enum class Kind : std::uint8_t { Link = 0, Separator, Text, Dialog };
+	Kind kind{Kind::Link};
+	std::string label;
+	std::string url;                       /*!< The link to open. */
+	std::vector<std::string> fallbacks;    /*!< Further links tried when the first fails. */
+	std::string dialogText;                /*!< The message a dialog row shows. */
+	bool operator==(const AboutEntry&) const = default;
+};
+
+/*! The About menu an effect presents as a choice parameter. Empty entries mean no menu. */
+struct AboutMenu {
+	std::string name{"About"};
+	std::string mainText;                  /*!< A non-actionable first row. */
+	std::vector<AboutEntry> entries;
+	bool empty() const noexcept { return entries.empty() && mainText.empty(); }
+	bool operator==(const AboutMenu&) const = default;
+};
+
 /*! An effect manifest. */
 struct EffectManifest {
 	unsigned schemaVersion{1};
@@ -256,10 +289,15 @@ struct EffectManifest {
 	std::vector<ParameterSpec> parameters;
 	std::vector<Migration> migrations;
 	std::vector<std::string> priorUuids;   /*!< Earlier identities whose presets still apply. */
+	std::vector<ManifestPreset> presets;   /*!< Built-in presets, listed by the presets control. */
+	AboutMenu about;                       /*!< The About menu; empty means none. */
 	/*! Free-form effect properties for extensions. The framework reads `manageMeta` and
-	    `manageVisibility` (both default true) to decide whether to load its meta and visibility
-	    extensions on an instance. */
+	    `manageVisibility` (both default true), and `internationalize`, `debugMenu`,
+	    `trackInstances`, `regression`, and `analysis` (all default false), to decide which
+	    framework extensions to load on an instance. */
 	std::map<std::string, Value> properties;
+	/*! A property as a boolean, or `fallback` when absent. */
+	bool property(std::string_view name, bool fallback) const;
 
 	/*! Checks the manifest. The first failure is returned with context tags naming the parameter. */
 	Error validate() const;

@@ -2,6 +2,8 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/ofx/Effect.hpp>
 
+#include <ofxgrip/ofx/Descriptor.hpp>
+
 #include <algorithm>
 
 OFXGRIP_NAMESPACE_BEGIN
@@ -37,6 +39,13 @@ Effect::~Effect()
 	metaExtension_ = nullptr;
 	visibilityExtension_ = nullptr;
 	versioningExtension_ = nullptr;
+	presetsExtension_ = nullptr;
+	aboutExtension_ = nullptr;
+	debugExtension_ = nullptr;
+	analysisExtension_ = nullptr;
+	i18nExtension_ = nullptr;
+	instanceTracker_ = nullptr;
+	regressionExtension_ = nullptr;
 }
 
 HostServices& Effect::services()
@@ -59,6 +68,11 @@ Error Effect::onCreate()
 }
 Error Effect::onMigrate(unsigned, unsigned, Version)
 {
+	return Error::none();
+}
+Error Effect::onAnalyzeFrame(const ImageView&, Time, long, Bytes&, bool& store)
+{
+	store = false;
 	return Error::none();
 }
 Error Effect::onInstanceChanged(const ChangeEvent&)
@@ -128,6 +142,73 @@ void Effect::loadFrameworkExtensions()
 	if (enabled("manageVisibility")) {
 		visibilityExtension_ = static_cast<VisibilityExtension*>(extensions_->load(std::make_unique<VisibilityExtension>()));
 	}
+	MetaManager* metaManager = metaExtension_ == nullptr ? nullptr : &metaExtension_->manager();
+	presets_ = std::make_unique<PresetManager>(*this, metaManager);
+	bool hasPresetsControl = false;
+	for (ParameterId id : services_->parameters().ids()) {
+		const ParameterSpec* spec = services_->parameters().spec(id);
+		hasPresetsControl = hasPresetsControl || (spec != nullptr && spec->type == ParameterType::Presets);
+	}
+	if (hasPresetsControl) {
+		presetsExtension_ = static_cast<PresetsExtension*>(extensions_->load(std::make_unique<PresetsExtension>(metaManager)));
+	}
+	if (!m.about.empty() && services_->binding(kParameterIdAboutMenu) != nullptr) {
+		aboutExtension_ = static_cast<AboutExtension*>(extensions_->load(std::make_unique<AboutExtension>(m.about, kParameterIdAboutMenu)));
+	}
+	if (services_->binding(kParameterIdDebugMenu) != nullptr) {
+		debugExtension_ = static_cast<DebugExtension*>(extensions_->load(std::make_unique<DebugExtension>(kParameterIdDebugMenu)));
+	}
+	bool hasAnalyzer = m.property("analysis", false);
+	for (ParameterId id : services_->parameters().ids()) {
+		const ParameterSpec* spec = services_->parameters().spec(id);
+		hasAnalyzer = hasAnalyzer || (spec != nullptr && spec->type == ParameterType::Analyzer);
+	}
+	if (hasAnalyzer) {
+		analysisExtension_ = static_cast<AnalysisExtension*>(extensions_->load(std::make_unique<AnalysisExtension>()));
+	}
+	if (m.property("internationalize", false)) {
+		if (std::optional<StringTable> table = findStringTable(services_->identity().bundlePath, preferredLanguages())) {
+			I18nExtension::Switches switches;
+			switches.delocalizeNames = m.property("delocalizeNames", true);
+			switches.delocalizeValues = m.property("delocalizeValues", switches.delocalizeNames);
+			switches.delocalizeMenus = m.property("delocalizeMenus", switches.delocalizeValues);
+			i18nExtension_ = static_cast<I18nExtension*>(extensions_->load(std::make_unique<I18nExtension>(std::move(*table), switches)));
+		}
+	}
+	if (m.property("trackInstances", false)) {
+		instanceTracker_ = static_cast<InstanceTrackerExtension*>(extensions_->load(std::make_unique<InstanceTrackerExtension>()));
+	}
+	if (m.property("regression", false)) {
+		regressionExtension_ = static_cast<RegressionExtension*>(extensions_->load(std::make_unique<RegressionExtension>()));
+	}
+}
+
+FrameData* Effect::analysis()
+{
+	return analysisExtension_ == nullptr ? nullptr : &analysisExtension_->data();
+}
+
+AnalysisResult Effect::runAnalysis(const AnalysisRequest& request)
+{
+	return ofxgrip::runAnalysis(*this, request);
+}
+
+std::optional<Bytes> Effect::analysisRecordAt(Time time) const
+{
+	return analysisExtension_ == nullptr ? std::nullopt : analysisExtension_->recordAt(time);
+}
+
+const StringTable* Effect::stringTable() const
+{
+	return i18nExtension_ == nullptr ? nullptr : &i18nExtension_->table();
+}
+
+PresetManager& Effect::presets()
+{
+	if (!presets_) {
+		throw OfxGripException(Error::make(ErrorCode::BadHandle, "The effect is not attached to a host"));
+	}
+	return *presets_;
 }
 
 ParameterModel& Effect::parameters()

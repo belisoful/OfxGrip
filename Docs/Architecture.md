@@ -1,12 +1,17 @@
 # OfxGrip Architecture
 
-Date: 2026-10-14. Phase 1.
+Date: 2026-10-14. Phase 2.
 
 ## Layers
 
 ```
- Plug-in author
-   manifest (EffectManifest, C++ or JSON) · Effect subclass · kernels (CPU and MSL now; Slang later)
+ Plug-in author (C++, or Rust through the C contract)
+   manifest (EffectManifest, C++, JSON, or the C/Rust builders) · Effect subclass or callback
+   table · kernels (CPU and MSL now; Slang later)
+ ────────────────────────────────────────────────────────────────────────────────────────────────
+ ofxgrip_c (include/ofxgrip/c) · rust/ofxgrip-sys · rust/ofxgrip
+   the C contract over the adapter: manifest building, one callback table per effect, the render
+   context, the snapshot, the services, the bundle exports; the Rust crates wrap it
  ────────────────────────────────────────────────────────────────────────────────────────────────
  ofxgrip (the OpenFX adapter, include/ofxgrip/ofx)
    Plugin     bounded registry, one slot per major (current and deprecated), per-slot
@@ -14,7 +19,8 @@ Date: 2026-10-14. Phase 1.
    PluginSlot action dispatch with one catch boundary, host profile at load, lifecycle events
    Descriptor manifest → OFX descriptor, clips, parameters (registry handling rules applied)
    Effect     the author base: hooks, parameter objects, framework extensions, snapshot
-              building, RenderContext, EditScope
+              building, RenderContext, EditScope, presets, analysis
+   Analysis   the analysis pass over clipGetImage inside a parameter action
    OfxHostServices  HostServices over the suites: parameters, persistence, feedback, threads,
                     time, paths, log
    Actions · PropertySet · Suites · ResolveExtensions
@@ -24,9 +30,11 @@ Date: 2026-10-14. Phase 1.
                  buffers over MTLBuffer frames (metal-cpp; no Objective-C class)
  ────────────────────────────────────────────────────────────────────────────────────────────────
  ofxgrip_core (host-neutral, include/ofxgrip/core; no OpenFX include)
-   Types · Error · Value · Codec · Flags · Manifest (+ JSON, target presets) · Rules
-   Events (bus) · Extension (system) · Parameters (objects, model) · MetaManager
-   MetaExtension · VisibilityExtension · VersioningExtension
+   Types · Error · Value · Codec · Plist · Flags · Manifest (+ JSON, target presets, presets
+   table, About menu) · Rules · Events (bus) · Extension (system) · Parameters · MetaManager
+   Preset (.fxpreset) · Presets (manager, control) · FrameData · I18n · About · Debug
+   InstanceTracker · Regression · the framework extensions (Meta, Visibility, Versioning,
+   Analysis, Presets, About, Debug, I18n, InstanceTracker, Regression)
    HostProfile + Quirks (registry table) · RenderSnapshot (+ codec) · Image (CPU, GpuImage)
  ────────────────────────────────────────────────────────────────────────────────────────────────
  Hosts: DaVinci Resolve (live), the mini host (CI, CPU and Metal frames), Nuke and Natron
@@ -69,7 +77,7 @@ the host libraries plan happens. `ofxgrip` is the OpenFX adapter and contains no
 - A Metal render encodes on the host's queue and commits without waiting (`ofxGPURender.h`); on
   the Fusion page the source is copied to a scratch buffer first (Q-RESOLVE-031). The backend's
   process-wide cache holds only immutable pipelines and reusable scratch buffers under a mutex.
-- Where the secret flag is permanent after describe (Q-NUKE-003), a visibility rule lowers to the
+- Where the secret flag is permanent after describe (Q-NUKE-010), a visibility rule lowers to the
   enabled flag.
 
 ## State tiers (D-002)
@@ -97,8 +105,41 @@ manifest record otherwise; writes need the manager.
 | `VersioningExtension` | The stored schema and plug-in version (`ofxgrip.version`). Runs the manifest's renames and `Effect::onMigrate` when the document is older; records the new version only on success. A deprecated major registers its own plug-in slot. | CreateInstance −19 |
 | `MetaExtension` | The `MetaManager`: tags, meta, the tag index; seeds from the manifest additively, merges the stored copy (stored wins), applies target presets in the order values, flags, tags, meta, labels, snaps momentary controls back to their reset value, saves on flush. Off with the manifest property `manageMeta` = false. | CreateInstance −18, InstanceChanged −10, Flush −14 |
 | `VisibilityExtension` | Parsed `visibleWhen` and `enabledWhen` rules and their dependents; sets `Secret` and `Enabled`. Off with `manageVisibility` = false. | CreateInstance −17, InstanceChanged 0, SyncPrivateData 0 |
+| `PresetsExtension` | The presets controls: lists the presets for the control's first tag, applies the picked one, records the selection by name (`ofxgrip.selectedPreset` in the meta store), handles Reveal and Save. Loaded when the manifest declares a `Presets` control. | CreateInstance −16, InstanceChanged −12 |
+| `AnalysisExtension` | The `FrameData` store (`ofxgrip.analysis`), its spill directory under the cache folder, and its save on flush. Loaded for an `Analyzer` control or the `analysis` property. | CreateInstance −18, Flush −14 |
+| `AboutExtension`, `DebugExtension` | The momentary About and Debug menus (parameters 9993 and 9994, appended by `frameworkParameters`). The debug menu needs `debugMenu` and `EffectFactory::allowsDebugFeatures()`. | InstanceChanged −12 |
+| `I18nExtension` | Runtime localization through the bundle's `.strings` table; the plug-in slot localizes a copy of the manifest at describe. Needs `internationalize` and a table in the bundle. | API label, value, and option events |
+| `InstanceTrackerExtension`, `RegressionExtension` | The process-wide instance registry (`trackInstances`) and the development-time manifest checks (`regression`). | load, DestroyInstance |
 
 The author's extensions load after these, so they observe a current parameter model.
+
+## Presets (phase 2)
+
+`Preset` is the model and the `.fxpreset` file form: FxFactory's seven keys under their exact
+names plus FxGrip's seven sibling keys, parameter-keyed dictionaries with string IDs, values in
+FxFactory's encodings (colors and points as dictionaries, toggles as integers). `PresetManager`
+captures the instance (state parameters, tags, meta; `PresetNo*` flags opt a section out),
+applies inside the tag boundary in the order values, tags, meta with an optional remap, and lists
+presets from the manifest's table, the bundle's `Contents/Resources/Presets/<tag>/`, and the user
+folder `<support>/Presets/<tag>/`. A `Presets` control lowers to a choice whose options are
+computed at describe, so a host that freezes options (Q-RESOLVE-021) still lists what exists.
+
+## Analysis (phase 2)
+
+`runAnalysis` fetches a clip's frames over a range with `clipGetImage` inside the parameter
+action that started it, hands each to `Effect::onAnalyzeFrame`, stores the records by frame
+index in `FrameData`, reports through the progress suite, and stops on abort. Records larger
+than the spill threshold go to files under the cache folder named by a UUID the store carries,
+so a reopened document finds them again; a missing file reads as a missing record.
+
+## The C contract and Rust (phase 2)
+
+`ofxgrip_c.h` is additive: a point release adds functions and never changes one. Every object is
+opaque, every string UTF-8, every failing call returns a status and leaves a thread-local
+message. An effect is a table of callbacks owned by a `CFactory`; the `ofxgrip_effect` behind
+the handle is a real `Effect`, so every framework extension applies. The Rust crate wraps the
+contract with a `Manifest` builder, an `Effect` trait, and a `bundle!` macro that exports the
+three OpenFX symbols; panics never cross the boundary.
 
 ## Rules
 

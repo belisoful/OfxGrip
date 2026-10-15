@@ -289,9 +289,25 @@ public:
 
 class FakePaths final : public PathService {
 public:
-	std::filesystem::path cacheDirectory() override { return std::filesystem::temp_directory_path(); }
-	std::filesystem::path userSupportDirectory() override { return std::filesystem::temp_directory_path(); }
+	std::filesystem::path cacheDirectory() override { return cache.empty() ? std::filesystem::temp_directory_path() : cache; }
+	std::filesystem::path userSupportDirectory() override { return support.empty() ? std::filesystem::temp_directory_path() : support; }
 	std::filesystem::path logDirectory() override { return std::filesystem::temp_directory_path(); }
+	bool openUrl(std::string_view url) override
+	{
+		openedUrls.emplace_back(url);
+		return openSucceeds;
+	}
+	bool reveal(const std::filesystem::path& path) override
+	{
+		revealed.push_back(path);
+		return revealSucceeds;
+	}
+	std::filesystem::path cache;
+	std::filesystem::path support;
+	std::vector<std::string> openedUrls;
+	std::vector<std::filesystem::path> revealed;
+	bool openSucceeds{true};
+	bool revealSucceeds{true};
 };
 
 /*! The complete seam over the fakes. */

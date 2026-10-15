@@ -305,14 +305,21 @@ private:
 			logger_.error("Manifest is invalid: " + e.describe());
 			return kOfxStatFailed;
 		}
-		LoweringReport report;
-		if (Error e = lowerEffectDescriptor(manifest_, profile_, suites_, descriptor, report)) {
-			logger_.error("Describe failed: " + e.describe());
-			return errorToStatus(e);
-		}
 		OfxPropertySetHandle props = nullptr;
 		if (suites_.imageEffect->getPropertySet(descriptor, &props) == kOfxStatOK) {
 			bundlePath_ = PropertySet(suites_.property, props).getString(kOfxPluginPropFilePath, std::string(), 0);
+		}
+		localized_.reset();
+		if (manifest_.property("internationalize", false)) {
+			if (std::optional<StringTable> table = findStringTable(bundlePath_, preferredLanguages())) {
+				localized_ = std::make_unique<EffectManifest>(manifest_);
+				localizeManifest(*localized_, *table);
+			}
+		}
+		LoweringReport report;
+		if (Error e = lowerEffectDescriptor(describedManifest(), profile_, suites_, descriptor, report)) {
+			logger_.error("Describe failed: " + e.describe());
+			return errorToStatus(e);
 		}
 		for (const std::string& name : report.rejectedProperties) {
 			profile_.extensionPropertyAccepted[name] = false;
@@ -328,7 +335,11 @@ private:
 			logger_.warning("Describe-in-context with an unknown context; using the manifest kind");
 		}
 		LoweringReport report;
-		if (Error e = lowerContextDescriptor(manifest_, profile_, suites_, descriptor, context, report)) {
+		LoweringContext lowering;
+		lowering.bundlePath = bundlePath_;
+		lowering.userSupportDirectory = defaultUserSupportDirectory(identifier_);
+		lowering.debugAllowed = factory_->allowsDebugFeatures();
+		if (Error e = lowerContextDescriptor(describedManifest(), profile_, suites_, descriptor, context, report, lowering)) {
 			logger_.error("Describe-in-context failed: " + e.describe());
 			return errorToStatus(e);
 		}
@@ -357,6 +368,7 @@ private:
 		identity.instanceId = identifier_ + "#" + std::to_string(++instanceCounter_);
 		identity.bundlePath = bundlePath_;
 		auto services = std::make_unique<OfxHostServices>(suites_, profile_, manifest_, identity, effect->bus(), logger_, handle);
+		services->setDebugFeaturesAllowed(factory_->allowsDebugFeatures());
 		services->setPhase(Phase::CreateInstance);
 		if (Error e = services->bind()) {
 			logger_.error("Create instance failed: " + e.describe());
@@ -428,6 +440,13 @@ private:
 			e = effect.onInstanceChanged(event);
 		}
 		if (!e && spec != nullptr && (spec->type == ParameterType::PushButton || spec->type == ParameterType::Analyzer || spec->type == ParameterType::Help)) {
+			if (spec->type == ParameterType::Analyzer) {
+				// An analyzer control starts the pass over the source clip, as FxGrip's does.
+				const AnalysisResult result = effect.runAnalysis(AnalysisRequest{});
+				if (result.error) {
+					logger_.warning("Analysis stopped: " + result.error.describe());
+				}
+			}
 			ChangeEvent clicked(EventId::ParameterClicked, id, args.name, args.time, args.reason);
 			e = effect.bus().post(clicked);
 			if (!e) {
@@ -648,8 +667,12 @@ private:
 		return kOfxStatOK;
 	}
 
+	/*! The manifest the host sees at describe: the authored one, or its localized copy. */
+	const EffectManifest& describedManifest() const noexcept { return localized_ ? *localized_ : manifest_; }
+
 	std::shared_ptr<EffectFactory> factory_;
 	EffectManifest manifest_;
+	std::unique_ptr<EffectManifest> localized_;
 	std::string identifier_;
 	FileLogger logger_;
 	OfxPlugin plugin_{};

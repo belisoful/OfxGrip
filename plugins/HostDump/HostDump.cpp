@@ -53,7 +53,7 @@ EffectManifest makeManifest()
 	m.identity.description = "Records the host's capabilities and behavior to the OfxGrip log. Passes the image through.";
 	m.identity.kind = EffectKind::Filter;
 	m.identity.extraContexts = {EffectKind::General, EffectKind::Generator};
-	m.version = Version{1, 1, 0};
+	m.version = Version{1, 2, 0};
 	m.capabilities.depths = {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float};
 #if defined(OFXGRIP_HAS_METAL)
 	m.capabilities.metalRender = true;

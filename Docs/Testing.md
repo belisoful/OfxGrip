@@ -6,10 +6,12 @@ Four layers, as `Research/Comparison.md` §3.16 and D-004 lay out.
 
 | Layer | Where | What it covers |
 | --- | --- | --- |
-| Host-free unit tests | `tests/core/` | Every `core/` header: types, errors, values, the byte codec, flags, manifest and JSON (target presets, rules), the event bus, extensions, the host profile and quirk table, the snapshot codec, images and bands, the meta manager, the rule language, the parameter model, and the three framework extensions over `FakeServices.hpp` |
+| Host-free unit tests | `tests/core/` | Every `core/` header: types, errors, values, the byte codec, the plist codec, flags, manifest and JSON (target presets, rules, presets, About), the event bus, extensions, the host profile and quirk table, the snapshot codec, images and bands, the meta manager, the rule language, the parameter model, presets and the presets control, frame data and analysis, I18N, the menus, the instance tracker, the regression checks, and the framework extensions over `FakeServices.hpp` |
+| C contract tests | `tests/c/` | A manifest built through the C API and an effect whose behavior is a C callback table, driven through the mini host |
+| Rust tests | `rust/` (`cargo test -p ofxgrip`, run by ctest as `rust.cargo_test` when `OFXGRIP_BUILD_RUST` is on) | The safe crate: manifest building and serialization, registration, enum conversions |
 | GPU backend tests | `tests/gpu/` (macOS) | The Metal backend on the system default device: compile, cache, dispatch, blit copy and fill, the scratch pool, error paths. Skipped without a device |
 | Adapter contract tests | `tests/ofx/` | Action decoding, property sets, descriptor lowering, and the whole adapter driven in process: a test effect registered with the `PluginRegistry` and run through the mini host (lifecycle events, parameter service and phases, persistence, snapshots, tiled and threaded render, identity, the Resolve profile's quirk paths) |
-| Artifact and bundle tests | `tests/integration/`, `scripts/validate-bundle.py` | The built `OfxGripGain` and `OfxGripHostDump` bundles loaded with `dlopen`, described, and rendered across depths, tiles, threads, and profiles, on CPU frames and on Metal frames (compared per pixel); bundle layout, `Info.plist`, exports, architectures |
+| Artifact and bundle tests | `tests/integration/`, `scripts/validate-bundle.py` | The built `OfxGripGain` and `OfxGripHostDump` bundles loaded with `dlopen`, described, and rendered across depths, tiles, threads, and profiles, on CPU frames and on Metal frames (compared per pixel); the Rust `OfxGripGainRs` bundle when `OFXGRIP_BUILD_RUST` is on; bundle layout, `Info.plist`, exports, architectures |
 | Live probes | `plugins/HostDump`, `scripts/install-bundle.sh` | Run in DaVinci Resolve; results go into `Research/Host Quirks Registry.md` with host version, OS, and date |
 
 ## The mini host
@@ -42,6 +44,9 @@ and reads the output back after the queue drains, as `ofxGPURender.h` describes.
 the whole window and the render window selects the tile. The request falls back to CPU frames when
 the host options or the plug-in descriptor lack Metal, or no device exists; `RenderResult::gpu`
 says which happened.
+
+Tests run with `OFXGRIP_LOG_DIR`, `OFXGRIP_SUPPORT_DIR`, and `OFXGRIP_CACHE_DIR` pointing into the
+build directory, so user presets and analysis spill files never touch the real folders.
 
 `MiniHost::createInstance` takes a `restore` callback that runs over the instantiated parameters
 before the create action, so a test can imitate a host restoring a saved document (the hidden

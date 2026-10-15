@@ -87,6 +87,7 @@ std::vector<QuirkInfo> makeRegistry()
 		{Quirk::ChoiceOptionsFrozenAfterDescribe, "Q-NUKE-006", "ChoiceOptionsFrozenAfterDescribe", "parameters", {{kNuke, kOpen, kOpen}}},
 		{Quirk::DescribeErrorFatal, "Q-NUKE-025", "DescribeErrorFatal", "registration/loading", {{kNuke, kOpen, kOpen}}},
 		{Quirk::FirstClipIsDefault, "Q-NUKE-024", "FirstClipIsDefault", "clips/masks", {{kNuke, kOpen, kOpen}}},
+		{Quirk::LabelStringNotPersistent, "Q-NUKE-009", "LabelStringNotPersistent", "parameters", {{kNuke, kOpen, kOpen}}},
 
 		{Quirk::NatronFakeHostName, "Q-NATRON-001", "NatronFakeHostName", "registration/loading", {{kNatron, kOpen, kOpen}}},
 		{Quirk::ScreenPixelRatioProvided, "Q-NATRON-003", "ScreenPixelRatioProvided", "HiDPI", {{kNatron, kOpen, kOpen}}},

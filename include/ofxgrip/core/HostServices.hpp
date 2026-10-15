@@ -192,6 +192,18 @@ public:
 	virtual std::filesystem::path userSupportDirectory() = 0;
 	/*! The directory for log files. */
 	virtual std::filesystem::path logDirectory() = 0;
+	/*! Opens a URL in the user's browser. The default does nothing and reports false. */
+	virtual bool openUrl(std::string_view url)
+	{
+		(void)url;
+		return false;
+	}
+	/*! Reveals a file or folder in the user's file browser. The default does nothing. */
+	virtual bool reveal(const std::filesystem::path& path)
+	{
+		(void)path;
+		return false;
+	}
 };
 
 /*! The complete seam. */

@@ -518,6 +518,8 @@ Error parseManifestJson(std::string_view json, EffectManifest& out)
 		m.identity.shortName = e.value("shortName", "");
 		m.identity.grouping = e.value("grouping", e.value("group", ""));
 		m.identity.description = e.value("description", "");
+		m.identity.author = e.value("author", "");
+		m.identity.productId = e.value("productId", "");
 		if (e.contains("kind") && !parseEffectKind(e["kind"].get<std::string>(), m.identity.kind)) {
 			return fail("$.effect.kind", "unknown kind");
 		}
@@ -631,6 +633,103 @@ Error parseManifestJson(std::string_view json, EffectManifest& out)
 			return e;
 		}
 	}
+	if (root.contains("presets")) {
+		if (!root["presets"].is_array()) {
+			return fail("$.presets", "expected an array");
+		}
+		int index = 0;
+		for (const auto& entry : root["presets"]) {
+			const std::string path = "$.presets[" + std::to_string(index++) + "]";
+			if (!entry.is_object()) {
+				return fail(path, "expected an object");
+			}
+			ManifestPreset preset;
+			preset.name = entry.value("name", "");
+			preset.tag = entry.value("tag", "");
+			if (entry.contains("values") && entry["values"].is_object()) {
+				for (const auto& [key, v] : entry["values"].items()) {
+					Value value;
+					if (!readValue(v, value)) {
+						return fail(path + ".values." + key, "unreadable value");
+					}
+					preset.values[key] = std::move(value);
+				}
+			}
+			if (entry.contains("tags") && entry["tags"].is_object()) {
+				for (const auto& [key, list] : entry["tags"].items()) {
+					if (!list.is_array()) {
+						return fail(path + ".tags." + key, "expected an array");
+					}
+					for (const auto& t : list) {
+						if (!t.is_string()) {
+							return fail(path + ".tags." + key, "expected strings");
+						}
+						preset.tags[key].push_back(t.get<std::string>());
+					}
+				}
+			}
+			if (entry.contains("meta") && entry["meta"].is_object()) {
+				for (const auto& [key, entries] : entry["meta"].items()) {
+					if (!entries.is_object()) {
+						return fail(path + ".meta." + key, "expected an object");
+					}
+					for (const auto& [name, v] : entries.items()) {
+						Value value;
+						if (!readValue(v, value)) {
+							return fail(path + ".meta." + key + "." + name, "unreadable value");
+						}
+						preset.meta[key][name] = std::move(value);
+					}
+				}
+			}
+			m.presets.push_back(std::move(preset));
+		}
+	}
+	if (root.contains("about")) {
+		const auto& about = root["about"];
+		if (!about.is_object()) {
+			return fail("$.about", "expected an object");
+		}
+		m.about.name = about.value("name", "About");
+		m.about.mainText = about.value("mainText", "");
+		if (about.contains("entries")) {
+			if (!about["entries"].is_array()) {
+				return fail("$.about.entries", "expected an array");
+			}
+			int index = 0;
+			for (const auto& e : about["entries"]) {
+				const std::string path = "$.about.entries[" + std::to_string(index++) + "]";
+				if (!e.is_object()) {
+					return fail(path, "expected an object");
+				}
+				AboutEntry entry;
+				const std::string kind = e.value("kind", "link");
+				if (kind == "link") {
+					entry.kind = AboutEntry::Kind::Link;
+				} else if (kind == "separator") {
+					entry.kind = AboutEntry::Kind::Separator;
+				} else if (kind == "text") {
+					entry.kind = AboutEntry::Kind::Text;
+				} else if (kind == "dialog") {
+					entry.kind = AboutEntry::Kind::Dialog;
+				} else {
+					return fail(path + ".kind", "unknown kind " + kind);
+				}
+				entry.label = e.value("label", "");
+				entry.url = e.value("url", "");
+				entry.dialogText = e.value("text", "");
+				if (e.contains("fallbacks")) {
+					for (const auto& f : e["fallbacks"]) {
+						if (!f.is_string()) {
+							return fail(path + ".fallbacks", "expected strings");
+						}
+						entry.fallbacks.push_back(f.get<std::string>());
+					}
+				}
+				m.about.entries.push_back(std::move(entry));
+			}
+		}
+	}
 	if (root.contains("migrations")) {
 		for (const auto& mig : root["migrations"]) {
 			Migration migration;
@@ -657,6 +756,12 @@ std::string writeManifestJson(const EffectManifest& m)
 	effect["name"] = m.identity.name;
 	if (!m.identity.shortName.empty()) {
 		effect["shortName"] = m.identity.shortName;
+	}
+	if (!m.identity.author.empty()) {
+		effect["author"] = m.identity.author;
+	}
+	if (!m.identity.productId.empty()) {
+		effect["productId"] = m.identity.productId;
 	}
 	effect["grouping"] = m.identity.grouping;
 	if (!m.identity.description.empty()) {
@@ -729,6 +834,69 @@ std::string writeManifestJson(const EffectManifest& m)
 		parameters.push_back(writeParameter(p));
 	}
 	root["parameters"] = parameters;
+	if (!m.presets.empty()) {
+		Json presets = Json::array();
+		for (const ManifestPreset& preset : m.presets) {
+			Json entry;
+			entry["name"] = preset.name;
+			if (!preset.tag.empty()) {
+				entry["tag"] = preset.tag;
+			}
+			Json values = Json::object();
+			for (const auto& [key, v] : preset.values) {
+				values[key] = writeValue(v);
+			}
+			entry["values"] = values;
+			if (!preset.tags.empty()) {
+				entry["tags"] = preset.tags;
+			}
+			if (!preset.meta.empty()) {
+				Json meta = Json::object();
+				for (const auto& [key, entries] : preset.meta) {
+					Json inner = Json::object();
+					for (const auto& [name, v] : entries) {
+						inner[name] = writeValue(v);
+					}
+					meta[key] = inner;
+				}
+				entry["meta"] = meta;
+			}
+			presets.push_back(entry);
+		}
+		root["presets"] = presets;
+	}
+	if (!m.about.empty()) {
+		Json about;
+		about["name"] = m.about.name;
+		if (!m.about.mainText.empty()) {
+			about["mainText"] = m.about.mainText;
+		}
+		Json entries = Json::array();
+		for (const AboutEntry& e : m.about.entries) {
+			Json entry;
+			switch (e.kind) {
+			case AboutEntry::Kind::Link: entry["kind"] = "link"; break;
+			case AboutEntry::Kind::Separator: entry["kind"] = "separator"; break;
+			case AboutEntry::Kind::Text: entry["kind"] = "text"; break;
+			case AboutEntry::Kind::Dialog: entry["kind"] = "dialog"; break;
+			}
+			if (!e.label.empty()) {
+				entry["label"] = e.label;
+			}
+			if (!e.url.empty()) {
+				entry["url"] = e.url;
+			}
+			if (!e.dialogText.empty()) {
+				entry["text"] = e.dialogText;
+			}
+			if (!e.fallbacks.empty()) {
+				entry["fallbacks"] = e.fallbacks;
+			}
+			entries.push_back(entry);
+		}
+		about["entries"] = entries;
+		root["about"] = about;
+	}
 	if (!m.migrations.empty()) {
 		Json migrations = Json::array();
 		for (const Migration& mig : m.migrations) {

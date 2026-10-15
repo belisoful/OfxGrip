@@ -87,6 +87,7 @@ enum class Quirk : std::uint16_t {
 	ChoiceOptionsFrozenAfterDescribe,
 	DescribeErrorFatal,
 	FirstClipIsDefault,
+	LabelStringNotPersistent,
 
 	// Natron (Q-NATRON-001 to 012): the subset the adapter handles in this phase
 	NatronFakeHostName,

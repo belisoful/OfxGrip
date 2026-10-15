@@ -17,12 +17,20 @@
 #include <ofxgrip/core/Extension.hpp>
 #include <ofxgrip/core/Image.hpp>
 #include <ofxgrip/core/Manifest.hpp>
+#include <ofxgrip/core/About.hpp>
+#include <ofxgrip/core/AnalysisExtension.hpp>
+#include <ofxgrip/core/Debug.hpp>
+#include <ofxgrip/core/I18n.hpp>
+#include <ofxgrip/core/InstanceTracker.hpp>
+#include <ofxgrip/core/Regression.hpp>
 #include <ofxgrip/core/MetaExtension.hpp>
 #include <ofxgrip/core/Parameters.hpp>
+#include <ofxgrip/core/Presets.hpp>
 #include <ofxgrip/core/RenderSnapshot.hpp>
 #include <ofxgrip/core/VersioningExtension.hpp>
 #include <ofxgrip/core/VisibilityExtension.hpp>
 #include <ofxgrip/ofx/Actions.hpp>
+#include <ofxgrip/ofx/Analysis.hpp>
 #include <ofxgrip/ofx/OfxHostServices.hpp>
 
 #include <functional>
@@ -113,6 +121,25 @@ public:
 	MetaExtension* metaExtension() { return metaExtension_; }
 	VisibilityExtension* visibilityExtension() { return visibilityExtension_; }
 	VersioningExtension* versioningExtension() { return versioningExtension_; }
+	PresetsExtension* presetsExtension() { return presetsExtension_; }
+	AboutExtension* aboutExtension() { return aboutExtension_; }
+	DebugExtension* debugExtension() { return debugExtension_; }
+	AnalysisExtension* analysisExtension() { return analysisExtension_; }
+	I18nExtension* i18nExtension() { return i18nExtension_; }
+	InstanceTrackerExtension* instanceTracker() { return instanceTracker_; }
+	RegressionExtension* regressionExtension() { return regressionExtension_; }
+	/*! The preset service (phase 2). Valid once attached. */
+	PresetManager& presets();
+	/*! The analysis store, or null when the effect declares no analyzer and no `analysis`
+	    property. */
+	FrameData* analysis();
+	/*! Runs the analysis pass over a clip (phase 2). Call from a parameter action. */
+	AnalysisResult runAnalysis(const AnalysisRequest& request = {});
+	/*! The stored analysis record at or before a time, or none. */
+	std::optional<Bytes> analysisRecordAt(Time time) const;
+	/*! The string table the instance localizes with, when the manifest sets `internationalize`
+	    and the bundle carries one. */
+	const StringTable* stringTable() const;
 	/*! Opens a parameter-edit window for writes outside a host callback (FxGrip's out-of-band
 	    access). The window closes, and flushes when asked, when the returned scope ends. */
 	EditScope edit(std::string_view name, bool flushOnClose = true) { return EditScope(services(), name, flushOnClose); }
@@ -124,6 +151,9 @@ public:
 	    the manifest's renames. Returning an error leaves the stored version unchanged so the
 	    migration runs again on the next open. */
 	virtual Error onMigrate(unsigned fromSchema, unsigned toSchema, Version fromVersion);
+	/*! Computes one frame's analysis record (phase 2). Set `store` to keep `record` at the frame
+	    index. The default stores nothing. */
+	virtual Error onAnalyzeFrame(const ImageView& frame, Time time, long frameIndex, Bytes& record, bool& store);
 	virtual Error onInstanceChanged(const ChangeEvent& change);
 	virtual Error onParameterClicked(ParameterId id);
 	virtual Error onBuildSnapshot(RenderSnapshotBuilder& builder, const RenderInfo& info);
@@ -154,9 +184,17 @@ private:
 	std::unique_ptr<OfxHostServices> services_;
 	std::unique_ptr<ExtensionSystem> extensions_;
 	std::unique_ptr<ParameterModel> parameters_;
+	std::unique_ptr<PresetManager> presets_;
 	MetaExtension* metaExtension_{nullptr};
 	VisibilityExtension* visibilityExtension_{nullptr};
 	VersioningExtension* versioningExtension_{nullptr};
+	PresetsExtension* presetsExtension_{nullptr};
+	AboutExtension* aboutExtension_{nullptr};
+	DebugExtension* debugExtension_{nullptr};
+	AnalysisExtension* analysisExtension_{nullptr};
+	I18nExtension* i18nExtension_{nullptr};
+	InstanceTrackerExtension* instanceTracker_{nullptr};
+	RegressionExtension* regressionExtension_{nullptr};
 	EffectManifest emptyManifest_;
 };
 
@@ -168,6 +206,9 @@ public:
 	virtual std::unique_ptr<Effect> create() = 0;
 	/*! Edits the manifest before describe, for example to append an extension's parameters. */
 	virtual void augmentManifest(EffectManifest& manifest) { (void)manifest; }
+	/*! Whether the debug menu may exist. A release build overrides this to return false so a
+	    manifest edit cannot re-enable it. */
+	virtual bool allowsDebugFeatures() const { return true; }
 	virtual void onLoad(const HostProfile& profile, LogService& log)
 	{
 		(void)profile;

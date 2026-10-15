@@ -1,6 +1,6 @@
 # OfxGrip Plan
 
-Date: 2026-10-14. Status: phase 0 is on `main`; phase 1 is built and verified (178 tests under debug, ASan+UBSan, TSan, and the x86_64 slice; Metal frames render through the mini host and match the CPU path per pixel). The per-page Resolve probes remain.
+Date: 2026-10-14. Status: phases 0 and 1 are on `main`; phase 2 is built and verified (218 tests under debug, ASan+UBSan, TSan, and the x86_64 slice, including the Rust sample bundle driven through the mini host). The per-page Resolve probes remain.
 
 OfxGrip is the OpenFX counterpart of FxGrip: a C++20 framework for OpenFX image-effect plug-ins
 that gives Resolve, Fusion, Nuke, and Natron plug-ins what FxGrip gives Final Cut Pro and Motion
@@ -77,12 +77,14 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: mini host Metal frames on macOS (`RenderRequest::gpu`); quirk profiles for Resolve, Nuke, Natron.
 - Open: Resolve behavior probes (registry section 5, step 2) on the Edit, Color, and Fusion pages, including a Metal render through Resolve's queue.
 
-### Phase 2: presets, analysis, controls, extensions
+### Phase 2: presets, analysis, controls, extensions (built 2026-10-14)
 
-- `.fxpreset` round trip shared with FxGrip's test vectors. Presets choice parameter. User folder per OS.
-- `AnalysisJob` and `FrameData` with spill. Progress suite.
-- Lowering of the custom-control vocabulary to standard parameters. I18N, About, Debug, instance tracker, regression extensions.
-- C contract (`ofxgrip_c.h`) and the Rust crate (`ofxgrip-sys`, `ofxgrip`). Needs the Rust toolchain on the dev Mac and a decision on the crate's repository.
+- Done: `Plist` (an XML property-list codec), `Preset` with FxFactory's seven keys and FxGrip's seven sibling keys, read against FxGrip's reference vector when the sibling checkout is present. `PresetManager` captures and applies inside the tag boundary with a remap hook, lists manifest, bundle, and user presets, and files user presets under the per-OS support folder. The `Presets` control lowers to a choice listing Default, user presets, plug-in presets, Reveal, and Save; the selection is recorded by name in the meta store.
+- Done: `FrameData` with size-gated spill to the cache folder, `AnalysisExtension` persisting it in the state parameter, `runAnalysis` fetching clip frames through `clipGetImage` inside a parameter action with progress and abort, `Effect::onAnalyzeFrame`, and the `Analyzer` control that starts the pass.
+- Done: control lowering: Section → open group; Banner and Divider → label-mode strings (disabled single-line fields where label strings do not persist, Q-NUKE-009); Status, Capsule, Progress → disabled standard parameters the effect writes into; Switch → boolean; `InDebugMode` parameters start hidden.
+- Done: `I18n` (`.strings` tables under `Contents/Resources/<lang>.lproj`, describe-time manifest localization, runtime label and value round trips), `About` and `Debug` menus as momentary choice parameters, `InstanceTracker`, and `Regression` checks. All gated by manifest properties.
+- Done: the C contract `include/ofxgrip/c/ofxgrip_c.h` (manifest building, a callback table per effect, render context, snapshot, services, bundle exports) and the Rust workspace under `rust/`: `ofxgrip-sys` (raw bindings, links this build or builds the libraries with the `cmake` crate), `ofxgrip` (safe API, `Effect` trait, `bundle!` macro), and `examples/gain-rs`, packaged as `OfxGripGainRs.ofx.bundle` by `OFXGRIP_BUILD_RUST=ON` and tested through the mini host. The crates live in this repository as a workspace; moving them to their own repository is a later decision.
+- Open: Resolve behavior probes for phase 1 and 2 features (presets control, analysis pass through `clipGetImage` in `instanceChanged`, label-mode strings) need an instance on each page.
 
 ### Phase 3: overlays, GPU engine, licensing
 
@@ -106,14 +108,17 @@ OfxGrip/
   external/openfx/ vendored OpenFX 1.5.1 C headers (BSD-3) and LICENSE.md
   external/metal-cpp/ Apple's metal-cpp (Apache-2.0)
   include/ofxgrip/ public headers
-    core/          host-neutral: Types, Error, Value, Codec, Flags, Manifest, ManifestJson, Rules,
-                   Events, Extension, HostServices, HostProfile, Quirks, RenderSnapshot, Image,
-                   Parameters, MetaManager, MetaExtension, VisibilityExtension,
-                   VersioningExtension, Preset (phase 2)  (GripTruck candidates, no OFX headers)
-    ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,
+    core/          host-neutral: Types, Error, Value, Codec, Plist, Flags, Manifest, ManifestJson,
+                   Rules, Events, Extension, HostServices, HostProfile, Quirks, RenderSnapshot,
+                   Image, Parameters, MetaManager, Preset, Presets, FrameData, I18n, About, Debug,
+                   InstanceTracker, Regression, and the framework extensions (Meta, Visibility,
+                   Versioning, Analysis)  (GripTruck candidates, no OFX headers)
+    ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect, Analysis,
                    Plugin, OfxHostServices, ResolveExtensions
     gpu/           MetalBackend (macOS); CUDA, OpenCL, and Vulkan backends in phase 3
-  src/             implementation, same split
+    c/             ofxgrip_c.h, the C contract
+  src/             implementation, same split (src/c holds the contract)
+  rust/            the Rust workspace: ofxgrip-sys, ofxgrip, examples/gain-rs
   minihost/        the headless OFX host library and `ofxgrip-minihost` CLI
   plugins/         HostDump (probe), Gain (sample)
   tests/           GoogleTest: unit tests per header, GPU backend tests, mini-host integration
@@ -152,10 +157,10 @@ CI runs the same steps on `macos-26`, and the build-and-test subset on `ubuntu-2
 
 | Item | Needed |
 | --- | --- |
-| The Rust crate's repository (the toolchain is installed; the bridge is confirmed) | Phase 2 |
+| The Rust crates live under `rust/` in this repository; a separate repository is a later choice | Decided for now |
 | metal-cpp: approved and vendored under `external/metal-cpp`; the Metal backend is built | Done |
 | Slang compiler (`slangc`) as a build dependency | Phase 3 |
 | Windows and Linux machines with Resolve for live tests | Phase 4 |
 | Licensing provider for Windows and Linux | Phase 3 |
-| Natron as a second free OFX host | Phase 2 |
+| Natron as a second free OFX host | Phase 3 |
 | Computer use (or the developer driving Resolve) for the per-page probes | Phase 1, open |

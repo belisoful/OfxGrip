@@ -30,7 +30,7 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} ${{ matrix.preset == 'debug' && '-DOFXGRIP_BUILD_RUST=ON' || '' }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Test

@@ -51,6 +51,8 @@ Code is commit-ready only when every check below passes.
 4. `x86_64` build and `ctest` under Rosetta
 5. `coverage` at or above `OFXGRIP_COVERAGE_MIN`
 6. `scripts/validate-bundle.py` on the built bundles
+7. The debug build once with `-DOFXGRIP_BUILD_RUST=ON` (cargo build, `cargo test -p ofxgrip`, and
+   the Rust bundle through the mini host), when the change touches the C contract or `rust/`
 
 Build and test are also run on Linux and Windows in CI once those platforms land (phase 4 in
 `Docs/Plan.md`); until then the Linux and Windows jobs may fail without blocking.
@@ -76,18 +78,24 @@ paraphrase their code. The official OpenFX headers are a separate case.
 ## Project Structure
 
 - `include/ofxgrip/core/` — host-neutral headers, no OpenFX include: `Types`, `Error`, `Value`,
-  `Codec`, `Flags`, `Manifest`, `ManifestJson`, `Rules`, `Events`, `Extension`, `HostServices`,
-  `HostProfile`, `Quirks`, `RenderSnapshot`, `Image`, `Parameters`, `MetaManager`,
-  `MetaExtension`, `VisibilityExtension`, `VersioningExtension`. These are the GripTruck
-  candidates.
+  `Codec`, `Plist`, `Flags`, `Manifest`, `ManifestJson`, `Rules`, `Events`, `Extension`,
+  `HostServices`, `HostProfile`, `Quirks`, `RenderSnapshot`, `Image`, `Parameters`,
+  `MetaManager`, `Preset`, `Presets`, `FrameData`, `I18n`, `About`, `Debug`, `InstanceTracker`,
+  `Regression`, and the framework extensions (`MetaExtension`, `VisibilityExtension`,
+  `VersioningExtension`, `AnalysisExtension`). These are the GripTruck candidates.
 - `include/ofxgrip/ofx/` — the OpenFX adapter: `Suites`, `PropertySet`, `Actions`, `Descriptor`,
-  `Effect`, `Plugin`, `OfxHostServices`, `ResolveExtensions`.
+  `Effect`, `Analysis`, `Plugin`, `OfxHostServices`, `ResolveExtensions`.
+- `include/ofxgrip/c/ofxgrip_c.h`, `src/c/` — the C contract. It is additive: a point release adds
+  functions and never changes or removes one.
+- `rust/` — the Cargo workspace: `ofxgrip-sys` (raw bindings; links `OFXGRIP_BUILD_DIR` or builds
+  the libraries with the `cmake` crate), `ofxgrip` (the safe API), `examples/gain-rs`. CMake builds
+  and packages it with `-DOFXGRIP_BUILD_RUST=ON`.
 - `include/ofxgrip/gpu/` — the GPU backends: `MetalBackend` (macOS). Opaque handles only; no
   Metal header is included from a public header.
 - `src/core/`, `src/ofx/`, `src/gpu/` — implementations, same split.
 - `minihost/` — the headless OFX host (library and `ofxgrip-minihost` CLI).
 - `plugins/` — `HostDump` (probe) and `Gain` (sample), each built into an `.ofx.bundle`.
-- `tests/core/`, `tests/ofx/`, `tests/gpu/`, `tests/integration/` — GoogleTest. Test files mirror
+- `tests/core/`, `tests/ofx/`, `tests/gpu/`, `tests/c/`, `tests/integration/` — GoogleTest. Test files mirror
   the header they cover: `ManifestTests.cpp` covers `Manifest.hpp`. `tests/core/FakeServices.hpp`
   holds the in-memory host services the host-free tests share.
 - `cmake/` — `OfxGripPlugin.cmake` (bundle layout, `Info.plist`), sanitizer and coverage helpers.

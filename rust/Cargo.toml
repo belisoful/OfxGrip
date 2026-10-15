@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["ofxgrip-sys", "ofxgrip", "examples/gain-rs"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/belisoful/OfxGrip"
+authors = ["Belisoful"]
+rust-version = "1.75"
+
+[profile.release]
+debug = 1

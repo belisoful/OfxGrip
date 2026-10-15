@@ -25,6 +25,16 @@ add_library(ofxgrip_core STATIC
   core/HostProfile.cpp
   core/RenderSnapshot.cpp
   core/Image.cpp
+  core/Plist.cpp
+  core/Preset.cpp
+  core/Presets.cpp
+  core/About.cpp
+  core/Debug.cpp
+  core/FrameData.cpp
+  core/AnalysisExtension.cpp
+  core/I18n.cpp
+  core/InstanceTracker.cpp
+  core/Regression.cpp
   core/MetaManager.cpp
   core/Rules.cpp
   core/Parameters.cpp
@@ -51,6 +61,7 @@ add_library(ofxgrip STATIC
   ofx/Descriptor.cpp
   ofx/OfxHostServices.cpp
   ofx/Effect.cpp
+  ofx/Analysis.cpp
   ofx/Plugin.cpp)
 add_library(OfxGrip::ofxgrip ALIAS ofxgrip)
 target_link_libraries(ofxgrip PUBLIC OfxGrip::core OfxGrip::openfx_headers)
@@ -79,3 +90,10 @@ if(APPLE)
   target_link_libraries(ofxgrip_gpu_metal PUBLIC OfxGrip::core PRIVATE OfxGrip::metal_cpp)
   target_compile_definitions(ofxgrip_gpu_metal PUBLIC OFXGRIP_HAS_METAL=1)
 endif()
+
+# ---- ofxgrip_c: the C contract over the adapter ---------------------------------------------------
+
+add_library(ofxgrip_c STATIC c/ofxgrip_c.cpp)
+add_library(OfxGrip::c ALIAS ofxgrip_c)
+target_link_libraries(ofxgrip_c PUBLIC OfxGrip::ofxgrip)
+target_compile_definitions(ofxgrip_c PRIVATE OFXGRIP_VERSION_STRING="${PROJECT_VERSION}")
