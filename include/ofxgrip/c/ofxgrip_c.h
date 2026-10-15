@@ -241,6 +241,9 @@ OFXGRIP_C_API int32_t ofxgrip_snapshot_has(const ofxgrip_snapshot* snapshot, uin
 OFXGRIP_C_API double ofxgrip_snapshot_time(const ofxgrip_snapshot* snapshot);
 OFXGRIP_C_API double ofxgrip_snapshot_frame_rate(const ofxgrip_snapshot* snapshot);
 OFXGRIP_C_API size_t ofxgrip_snapshot_page(const ofxgrip_snapshot* snapshot, char* buffer, size_t length);
+/*! The license state the snapshot was built under. Introduced in OfxGrip 0.4.0. */
+enum ofxgrip_license_state { OFXGRIP_LICENSE_UNKNOWN = 0, OFXGRIP_LICENSE_LICENSED = 1, OFXGRIP_LICENSE_TRIAL = 2, OFXGRIP_LICENSE_UNLICENSED = 3 };
+OFXGRIP_C_API int32_t ofxgrip_snapshot_license_state(const ofxgrip_snapshot* snapshot);
 
 /* ---- pixels --------------------------------------------------------------------------------- */
 

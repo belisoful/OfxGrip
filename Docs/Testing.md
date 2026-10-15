@@ -1,23 +1,23 @@
 # Testing OfxGrip
 
-Date: 2026-10-14.
+Date: 2026-10-15.
 
 Four layers, as `Research/Comparison.md` §3.16 and D-004 lay out.
 
 | Layer | Where | What it covers |
 | --- | --- | --- |
-| Host-free unit tests | `tests/core/` | Every `core/` header: types, errors, values, the byte codec, the plist codec, flags, manifest and JSON (target presets, rules, presets, About), the event bus, extensions, the host profile and quirk table, the snapshot codec, images and bands, the meta manager, the rule language, the parameter model, presets and the presets control, frame data and analysis, I18N, the menus, the instance tracker, the regression checks, and the framework extensions over `FakeServices.hpp` |
+| Host-free unit tests | `tests/core/` | Every `core/` header: types, errors, values, the byte codec, the plist codec, flags, manifest and JSON (target presets, rules, presets, About), the event bus, extensions, the host profile and quirk table, the snapshot codec, images and bands, the meta manager, the rule language, the parameter model, presets and the presets control, frame data and analysis, I18N, the menus, the instance tracker, the regression checks, the kernel contract (layout JSON, metadata block, tile maps, value packing, the catalog's resolution), the overlay parts and composites over a recording draw kit, the digests against the published vectors, the watermark's glyphs, placement, and composite, licensing (statuses, entitlements, the registry, the built-in providers, the extension's status, snapshot, menu, version gate, and update window), and the framework extensions over `FakeServices.hpp` |
 | C contract tests | `tests/c/` | A manifest built through the C API and an effect whose behavior is a C callback table, driven through the mini host |
 | Rust tests | `rust/` (`cargo test -p ofxgrip`, run by ctest as `rust.cargo_test` when `OFXGRIP_BUILD_RUST` is on) | The safe crate: manifest building and serialization, registration, enum conversions |
-| GPU backend tests | `tests/gpu/` (macOS) | The Metal backend on the system default device: compile, cache, dispatch, blit copy and fill, the scratch pool, error paths. Skipped without a device |
-| Adapter contract tests | `tests/ofx/` | Action decoding, property sets, descriptor lowering, and the whole adapter driven in process: a test effect registered with the `PluginRegistry` and run through the mini host (lifecycle events, parameter service and phases, persistence, snapshots, tiled and threaded render, identity, the Resolve profile's quirk paths) |
-| Artifact and bundle tests | `tests/integration/`, `scripts/validate-bundle.py` | The built `OfxGripGain` and `OfxGripHostDump` bundles loaded with `dlopen`, described, and rendered across depths, tiles, threads, and profiles, on CPU frames and on Metal frames (compared per pixel); the Rust `OfxGripGainRs` bundle when `OFXGRIP_BUILD_RUST` is on; bundle layout, `Info.plist`, exports, architectures |
+| GPU backend tests | `tests/gpu/` | The Metal backend on the system default device: compile, cache, dispatch, blit copy and fill, the scratch pool, error paths (macOS). The kernel engine (`ofxgrip_kernel_tests`): the CPU backend over the embedded fixture kernels, every binding mode of `GripInspect`, and the Metal backend compared against the CPU backend per depth and mode (the conformance suite). The OpenCL backend (`ofxgrip_opencl_tests`): programs, buffers, fills, dispatch. Each is skipped without a device |
+| Adapter contract tests | `tests/ofx/` | Action decoding, property sets, descriptor lowering, and the whole adapter driven in process: a test effect registered with the `PluginRegistry` and run through the mini host (lifecycle events, parameter service and phases, persistence, snapshots, tiled and threaded render, identity, the Resolve profile's quirk paths, the overlay interact through the draw suite and the OpenGL fallback, licensing through the framework parameters and the watermark on CPU, Metal, and OpenCL frames) |
+| Artifact and bundle tests | `tests/integration/`, `scripts/validate-bundle.py` | The built `OfxGripGain`, `OfxGripHostDump`, and `OfxGripSpot` bundles loaded with `dlopen`, described, and rendered across depths, tiles, threads, and profiles, on CPU frames and on Metal and OpenCL frames (compared per pixel); the Rust `OfxGripGainRs` bundle when `OFXGRIP_BUILD_RUST` is on; bundle layout, `Info.plist`, exports, architectures |
 | Live probes | `plugins/HostDump`, `scripts/install-bundle.sh` | Run in DaVinci Resolve; results go into `Research/Host Quirks Registry.md` with host version, OS, and date |
 
 ## The mini host
 
 `ofxgrip_minihost` implements the property, parameter, image-effect, memory, multithread, message
-(V1 and V2), progress (V1 and V2), and timeline suites. `HostOptions` selects what the host
+(V1 and V2), progress (V1 and V2), timeline, interact, and draw suites. `HostOptions` selects what the host
 description says, which suites are withheld, and which deviations it imitates:
 
 | Option | Registry entry |
@@ -40,10 +40,17 @@ render. Tiles really tile: the output image handed to each render covers only th
 
 With `RenderRequest::gpu = GpuApi::Metal` on macOS, the mini host uploads the inputs to
 `MTLBuffer`s, allocates the output buffer, passes its own command queue in the render arguments,
-and reads the output back after the queue drains, as `ofxGPURender.h` describes. GPU frames cover
-the whole window and the render window selects the tile. The request falls back to CPU frames when
-the host options or the plug-in descriptor lack Metal, or no device exists; `RenderResult::gpu`
-says which happened.
+and reads the output back after the queue drains, as `ofxGPURender.h` describes. `GpuApi::OpenCL`
+does the same with `cl_mem` buffers and a `cl_command_queue` on the system default device. GPU
+frames cover the whole window and the render window selects the tile. The request falls back to
+CPU frames when the host options or the plug-in descriptor lack the API, or no device exists;
+`RenderResult::gpu` says which happened.
+
+When the descriptor declares an overlay interact, `createInstance` creates the interact instance
+beside the effect. `Instance::overlayDraw`, `overlayPenDown`, `overlayPenMotion`, `overlayPenUp`,
+`overlayKeyDown`, `overlayKeyUp`, and the focus calls dispatch the interact actions; the draw
+suite records every call (`drawCalls()`), and `HostOptions::drawSuite = false` (the Nuke and
+Natron presets) withholds it so the plug-in takes the OpenGL path.
 
 Tests run with `OFXGRIP_LOG_DIR`, `OFXGRIP_SUPPORT_DIR`, and `OFXGRIP_CACHE_DIR` pointing into the
 build directory, so user presets and analysis spill files never touch the real folders.

@@ -39,8 +39,10 @@ const char* ofxParameterTypeFor(ParameterType type, const HostProfile& profile) 
     Strict mode keeps printable ASCII except `<`, `>`, and `&`. */
 std::string sanitizeLabel(const std::string& text, bool strict);
 
-/*! Lowers the describe-time properties onto the effect descriptor. */
-Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, LoweringReport& report);
+/*! Lowers the describe-time properties onto the effect descriptor. `overlayEntry` names the
+    overlay interact's entry point, declared on the draw-suite interact where the host vends the
+    draw suite and on the OpenGL interact otherwise; null declares none. */
+Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, LoweringReport& report, OfxPluginEntryPoint* overlayEntry = nullptr);
 
 /*! What the lowering needs beyond the manifest: where the bundle and the user support folder
     are, so a presets control lists the presets present at describe time. */
@@ -53,8 +55,9 @@ struct LoweringContext {
 /*! Lowers the clips and parameters for one context. */
 Error lowerContextDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, EffectKind context, LoweringReport& report, const LoweringContext& lowering = {});
 
-/*! The hidden framework parameters appended to a manifest: the instance state string, and the
-    About and Debug menus when the manifest asks for them (`about`, `debugMenu`). */
+/*! The hidden framework parameters appended to a manifest: the instance state string, the
+    About and Debug menus when the manifest asks for them (`about`, `debugMenu`), and the
+    licensing toggle and menu when the manifest declares a licensing provider. */
 std::vector<ParameterSpec> frameworkParameters(const EffectManifest& manifest = {}, bool debugAllowed = true);
 
 /*! The OpenFX names and IDs of the framework menus. */
@@ -62,6 +65,12 @@ inline constexpr const char* kAboutMenuParameterKey = "ofxgrip_about";
 inline constexpr ParameterId kParameterIdAboutMenu = 9993;
 inline constexpr const char* kDebugMenuParameterKey = "ofxgrip_debug";
 inline constexpr ParameterId kParameterIdDebugMenu = 9994;
+
+/*! The OpenFX names and IDs of the licensing parameters. Introduced in OfxGrip 0.4.0. */
+inline constexpr const char* kLicenseStatusParameterKey = "ofxgrip_licensed";
+inline constexpr ParameterId kParameterIdLicenseStatus = 9996;
+inline constexpr const char* kLicensingMenuParameterKey = "ofxgrip_licensing";
+inline constexpr ParameterId kParameterIdLicensingMenu = 9997;
 
 /*! The OpenFX name of the hidden instance-state parameter. */
 inline constexpr const char* kInstanceStateParameterKey = "ofxgrip_state";

@@ -1,6 +1,17 @@
 # Builds the Rust workspace under rust/ with cargo against this build's static libraries, and
 # packages the Rust sample (examples/gain-rs) as an OpenFX bundle the tests load.
 #
+if(TARGET ofxgrip_gpu_opencl)
+  set(_ofxgrip_rust_opencl 1)
+else()
+  set(_ofxgrip_rust_opencl 0)
+endif()
+if(APPLE OR OpenGL_FOUND)
+  set(_ofxgrip_rust_opengl 1)
+else()
+  set(_ofxgrip_rust_opengl 0)
+endif()
+
 # The sys crate links the libraries from OFXGRIP_BUILD_DIR, which this file sets to the current
 # build directory, so the Rust plug-in runs the same adapter the C++ plug-ins do.
 
@@ -51,7 +62,7 @@ set(_rust_binary "${OFXGRIP_RUST_BUNDLE_DIR}/Contents/${_arch_dir}/OfxGripGainRs
 
 add_custom_command(
   OUTPUT "${_cdylib}"
-  COMMAND ${CMAKE_COMMAND} -E env "${_cargo_env}" "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}"
+  COMMAND ${CMAKE_COMMAND} -E env "${_cargo_env}" "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}" "OFXGRIP_LINK_OPENCL=${_ofxgrip_rust_opencl}" "OFXGRIP_LINK_OPENGL=${_ofxgrip_rust_opengl}"
           "${OFXGRIP_CARGO}" build ${_cargo_profile_flag} ${_cargo_target_flag} --manifest-path "${_rust_root}/Cargo.toml" --workspace
   DEPENDS ofxgrip_c ofxgrip ofxgrip_core
   WORKING_DIRECTORY "${_rust_root}"
@@ -89,6 +100,6 @@ set_property(GLOBAL APPEND PROPERTY OFXGRIP_BUNDLES "${OFXGRIP_RUST_BUNDLE_DIR}"
 
 # The Rust crates' own tests, run by ctest beside the C++ suites.
 add_test(NAME rust.cargo_test
-  COMMAND ${CMAKE_COMMAND} -E env "${_cargo_env}" "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}" "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs"
+  COMMAND ${CMAKE_COMMAND} -E env "${_cargo_env}" "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}" "OFXGRIP_LINK_OPENCL=${_ofxgrip_rust_opencl}" "OFXGRIP_LINK_OPENGL=${_ofxgrip_rust_opengl}" "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs"
           "${OFXGRIP_CARGO}" test ${_cargo_profile_flag} --manifest-path "${_rust_root}/Cargo.toml" -p ofxgrip
   WORKING_DIRECTORY "${_rust_root}")

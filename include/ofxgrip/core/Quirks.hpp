@@ -88,6 +88,8 @@ enum class Quirk : std::uint16_t {
 	DescribeErrorFatal,
 	FirstClipIsDefault,
 	LabelStringNotPersistent,
+	NativeXYHandles,
+	InteractModelviewNotIdentity,
 
 	// Natron (Q-NATRON-001 to 012): the subset the adapter handles in this phase
 	NatronFakeHostName,

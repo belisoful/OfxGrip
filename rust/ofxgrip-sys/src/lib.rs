@@ -43,6 +43,10 @@ pub const OFXGRIP_GPU_CUDA: i32 = 2;
 pub const OFXGRIP_GPU_OPENCL: i32 = 3;
 pub const OFXGRIP_GPU_OPENGL: i32 = 4;
 pub const OFXGRIP_GPU_VULKAN: i32 = 5;
+pub const OFXGRIP_LICENSE_UNKNOWN: i32 = 0;
+pub const OFXGRIP_LICENSE_LICENSED: i32 = 1;
+pub const OFXGRIP_LICENSE_TRIAL: i32 = 2;
+pub const OFXGRIP_LICENSE_UNLICENSED: i32 = 3;
 
 pub const OFXGRIP_MESSAGE_LOG: i32 = 0;
 pub const OFXGRIP_MESSAGE_MESSAGE: i32 = 1;
@@ -268,6 +272,7 @@ extern "C" {
     pub fn ofxgrip_snapshot_time(snapshot: *const ofxgrip_snapshot) -> f64;
     pub fn ofxgrip_snapshot_frame_rate(snapshot: *const ofxgrip_snapshot) -> f64;
     pub fn ofxgrip_snapshot_page(snapshot: *const ofxgrip_snapshot, buffer: *mut c_char, length: usize) -> usize;
+    pub fn ofxgrip_snapshot_license_state(snapshot: *const ofxgrip_snapshot) -> i32;
 
     pub fn ofxgrip_bytes_per_component(depth: i32) -> i32;
     pub fn ofxgrip_read_component(pixel: *const c_void, depth: i32, component: i32) -> f32;

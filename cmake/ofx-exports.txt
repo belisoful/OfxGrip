@@ -1,0 +1,3 @@
+_OfxGetNumberOfPlugins
+_OfxGetPlugin
+_OfxSetHost

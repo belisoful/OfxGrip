@@ -27,7 +27,7 @@ llvm_cov="$(xcrun -f llvm-cov 2>/dev/null || command -v llvm-cov)"
 "$llvm_profdata" merge -sparse $profiles -o "$profdata"
 
 objects=""
-for exe in "$build"/tests/ofxgrip_core_tests "$build"/tests/ofxgrip_ofx_tests "$build"/tests/ofxgrip_integration_tests "$build"/tests/ofxgrip_gpu_tests "$build"/tests/ofxgrip_c_tests; do
+for exe in "$build"/tests/ofxgrip_core_tests "$build"/tests/ofxgrip_ofx_tests "$build"/tests/ofxgrip_integration_tests "$build"/tests/ofxgrip_gpu_tests "$build"/tests/ofxgrip_kernel_tests "$build"/tests/ofxgrip_opencl_tests "$build"/tests/ofxgrip_c_tests; do
 	[ -x "$exe" ] && objects="$objects -object $exe"
 done
 for plugin in $(find "$build/plugins" -name '*.ofx' -type f 2>/dev/null); do

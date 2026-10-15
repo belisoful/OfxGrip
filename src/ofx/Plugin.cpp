@@ -2,11 +2,15 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/ofx/Plugin.hpp>
 
+#include <ofxgrip/ofx/RenderWatermark.hpp>
+
 #include <ofxgrip/ofx/Descriptor.hpp>
+#include <ofxgrip/ofx/Interact.hpp>
 #include <ofxgrip/ofx/ResolveExtensions.hpp>
 
 #include "ofxGPURender.h"
 #include "ofxImageEffect.h"
+#include "ofxInteract.h"
 #include "ofxParam.h"
 
 #include <array>
@@ -75,6 +79,7 @@ public:
 		plugin_.pluginVersionMinor = manifest_.version.minor;
 		plugin_.setHost = detail::setHostTrampoline(index);
 		plugin_.mainEntry = detail::mainEntryTrampoline(index);
+		interactEntry_ = detail::interactEntryTrampoline(index);
 	}
 
 	OfxPlugin* plugin() noexcept { return &plugin_; }
@@ -100,7 +105,96 @@ public:
 		}
 	}
 
+	/*! The overlay interact's actions, with their own catch boundary. */
+	OfxStatus interactEntry(const char* action, const void* handle, OfxPropertySetHandle inArgs, OfxPropertySetHandle outArgs) noexcept
+	{
+		try {
+			return interactDispatch(parseAction(action), handle, inArgs, outArgs);
+		} catch (const OfxGripException& e) {
+			logger_.error(std::string("Interact action ") + (action ? action : "?") + " failed: " + e.error().describe());
+			return errorToStatus(e.error());
+		} catch (const std::exception& e) {
+			logger_.error(std::string("Interact action ") + (action ? action : "?") + " threw: " + e.what());
+			return kOfxStatFailed;
+		} catch (...) {
+			logger_.error(std::string("Interact action ") + (action ? action : "?") + " threw an unknown exception");
+			return kOfxStatFailed;
+		}
+	}
+
 private:
+	/*! The property set of an interact descriptor or instance. */
+	PropertySet interactProperties(const void* handle)
+	{
+		OfxPropertySetHandle props = nullptr;
+		if (handle == nullptr || suites_.interact == nullptr || suites_.interact->interactGetPropertySet == nullptr) {
+			return {};
+		}
+		if (suites_.interact->interactGetPropertySet(static_cast<OfxInteractHandle>(const_cast<void*>(handle)), &props) != kOfxStatOK) {
+			return {};
+		}
+		return PropertySet(suites_.property, props);
+	}
+
+	OfxStatus interactDispatch(Action action, const void* handle, OfxPropertySetHandle inArgs, OfxPropertySetHandle outArgs)
+	{
+		PropertySet props = interactProperties(handle);
+		PropertySet in(suites_.property, inArgs);
+		PropertySet out(suites_.property, outArgs);
+		switch (action) {
+		case Action::Describe:
+			if (props.valid()) {
+				props.trySetInt(kOfxInteractPropHasAlpha, 0);
+				props.trySetInt(kOfxInteractPropBitDepth, 8);
+			}
+			return kOfxStatOK;
+		case Action::CreateInstance: {
+			if (!props.valid()) {
+				return kOfxStatErrBadHandle;
+			}
+			Effect* effect = effectFor(props.getPointer(kOfxPropEffectInstance).value_or(nullptr));
+			if (effect == nullptr) {
+				logger_.warning("An overlay interact was created for an unknown effect instance");
+				return kOfxStatErrBadHandle;
+			}
+			auto interact = std::make_unique<OverlayInteract>(*effect, const_cast<void*>(handle));
+			if (!interact->hasControl()) {
+				return kOfxStatOK;
+			}
+			if (Error e = props.setPointer(kOfxPropInstanceData, interact.get())) {
+				return errorToStatus(e);
+			}
+			interact.release();
+			return kOfxStatOK;
+		}
+		case Action::DestroyInstance: {
+			auto* interact = static_cast<OverlayInteract*>(props.getPointer(kOfxPropInstanceData).value_or(nullptr));
+			if (interact != nullptr) {
+				props.setPointer(kOfxPropInstanceData, nullptr);
+				delete interact;
+			}
+			return kOfxStatOK;
+		}
+		case Action::InteractDraw:
+		case Action::InteractPenMotion:
+		case Action::InteractPenDown:
+		case Action::InteractPenUp:
+		case Action::InteractKeyDown:
+		case Action::InteractKeyUp:
+		case Action::InteractKeyRepeat:
+		case Action::InteractGainFocus:
+		case Action::InteractLoseFocus: {
+			auto* interact = static_cast<OverlayInteract*>(props.getPointer(kOfxPropInstanceData).value_or(nullptr));
+			if (interact == nullptr) {
+				return kOfxStatReplyDefault;
+			}
+			return interact->dispatch(action, in, out);
+		}
+		default:
+			return kOfxStatReplyDefault;
+		}
+	}
+
 	struct ImageHolder {
 		const Suites* suites{nullptr};
 		OfxPropertySetHandle handle{nullptr};
@@ -317,13 +411,16 @@ private:
 			}
 		}
 		LoweringReport report;
-		if (Error e = lowerEffectDescriptor(describedManifest(), profile_, suites_, descriptor, report)) {
+		if (Error e = lowerEffectDescriptor(describedManifest(), profile_, suites_, descriptor, report, interactEntry_)) {
 			logger_.error("Describe failed: " + e.describe());
 			return errorToStatus(e);
 		}
 		for (const std::string& name : report.rejectedProperties) {
 			profile_.extensionPropertyAccepted[name] = false;
 			logger_.debug("Descriptor property rejected by the host: " + name);
+		}
+		for (const std::string& warning : report.warnings) {
+			logger_.warning(warning);
 		}
 		return kOfxStatOK;
 	}
@@ -369,6 +466,7 @@ private:
 		identity.bundlePath = bundlePath_;
 		auto services = std::make_unique<OfxHostServices>(suites_, profile_, manifest_, identity, effect->bus(), logger_, handle);
 		services->setDebugFeaturesAllowed(factory_->allowsDebugFeatures());
+		services->setLicensingProvider(factory_->licensingProvider());
 		services->setPhase(Phase::CreateInstance);
 		if (Error e = services->bind()) {
 			logger_.error("Create instance failed: " + e.describe());
@@ -662,6 +760,14 @@ private:
 			logger_.error("Render failed: " + e.describe());
 			return errorToStatus(e);
 		}
+		if (LicensingExtension* licensing = effect.licensingExtension(); licensing != nullptr && !e) {
+			if (std::optional<WatermarkConfiguration> mark = licensing->watermarkFor(snapshot.license())) {
+				if (Error w = applyRenderWatermark(context, *mark)) {
+					logger_.error("Watermark failed: " + w.describe());
+					return errorToStatus(w);
+				}
+			}
+		}
 		PlainEvent event(EventId::Render);
 		effect.bus().post(event);
 		return kOfxStatOK;
@@ -676,6 +782,7 @@ private:
 	std::string identifier_;
 	FileLogger logger_;
 	OfxPlugin plugin_{};
+	OfxPluginEntryPoint* interactEntry_{nullptr};
 	OfxHost* host_{nullptr};
 	Suites suites_;
 	HostProfile profile_;
@@ -781,6 +888,21 @@ void PluginRegistry::setHost(int index, OfxHost* host)
 	if (slot != nullptr) {
 		slot->setHost(host);
 	}
+}
+
+OfxStatus PluginRegistry::interactEntry(int index, const char* action, const void* handle, OfxPropertySetHandle inArgs, OfxPropertySetHandle outArgs)
+{
+	PluginSlot* slot = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (index >= 0 && index < static_cast<int>(slots_.size())) {
+			slot = slots_[static_cast<std::size_t>(index)].get();
+		}
+	}
+	if (slot == nullptr) {
+		return kOfxStatErrBadHandle;
+	}
+	return slot->interactEntry(action, handle, inArgs, outArgs);
 }
 
 OfxStatus PluginRegistry::mainEntry(int index, const char* action, const void* handle, OfxPropertySetHandle inArgs, OfxPropertySetHandle outArgs)

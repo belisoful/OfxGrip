@@ -201,6 +201,30 @@ impl GpuApi {
     }
 }
 
+/// The license state a render snapshot was built under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LicenseState {
+    Unknown,
+    Licensed,
+    Trial,
+    Unlicensed,
+}
+
+impl LicenseState {
+    fn from_raw(raw: i32) -> Self {
+        match raw {
+            sys::OFXGRIP_LICENSE_LICENSED => LicenseState::Licensed,
+            sys::OFXGRIP_LICENSE_TRIAL => LicenseState::Trial,
+            sys::OFXGRIP_LICENSE_UNLICENSED => LicenseState::Unlicensed,
+            _ => LicenseState::Unknown,
+        }
+    }
+    /// Whether the state unlocks the effect.
+    pub fn unlocks(self) -> bool {
+        matches!(self, LicenseState::Licensed | LicenseState::Trial)
+    }
+}
+
 /// The kind of a message shown through the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageKind {
@@ -726,6 +750,10 @@ impl Snapshot {
     pub fn frame_rate(&self) -> f64 {
         unsafe { sys::ofxgrip_snapshot_frame_rate(self.raw) }
     }
+    /// The license state the snapshot was built under.
+    pub fn license_state(&self) -> LicenseState {
+        LicenseState::from_raw(unsafe { sys::ofxgrip_snapshot_license_state(self.raw) })
+    }
     /// The Resolve page the instance lives on, or empty.
     pub fn page(&self) -> String {
         let needed = unsafe { sys::ofxgrip_snapshot_page(self.raw, ptr::null_mut(), 0) };
@@ -1068,6 +1096,12 @@ mod tests {
         assert_eq!(Components::from_raw(77), Components::None);
         assert_eq!(GpuApi::from_raw(sys::OFXGRIP_GPU_METAL), GpuApi::Metal);
         assert_eq!(GpuApi::from_raw(77), GpuApi::None);
+        assert_eq!(LicenseState::from_raw(sys::OFXGRIP_LICENSE_TRIAL), LicenseState::Trial);
+        assert_eq!(LicenseState::from_raw(77), LicenseState::Unknown);
+        assert!(LicenseState::Licensed.unlocks());
+        assert!(!LicenseState::Unlicensed.unlocks());
+        let snapshot = Snapshot { raw: ptr::null() };
+        assert_eq!(snapshot.license_state(), LicenseState::Unknown);
         let image = Image { raw: sys::ofxgrip_image::default() };
         assert_eq!(image.pixel(0, 0), None);
         assert_eq!(image.read(0, 0, 0), 0.0);

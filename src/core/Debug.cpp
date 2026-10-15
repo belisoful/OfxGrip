@@ -4,9 +4,16 @@
 
 OFXGRIP_NAMESPACE_BEGIN
 
-ParameterSpec debugMenuParameter(ParameterId id, std::string key)
+ParameterSpec debugMenuParameter(ParameterId id, std::string key, bool licensing)
 {
-	ParameterSpec spec = ParameterSpec::menuParam(id, std::move(key), "Debug", {{"debug", "Debug"}, {"reveal", "Reveal hidden parameters"}, {"hide", "Hide parameters again"}}, 0);
+	std::vector<ChoiceOption> options{{"debug", "Debug"}, {"reveal", "Reveal hidden parameters"}, {"hide", "Hide parameters again"}};
+	if (licensing) {
+		options.push_back({std::string(kDebugMenuKeyLicenseLicensed), "License: force Licensed"});
+		options.push_back({std::string(kDebugMenuKeyLicenseTrial), "License: force Trial"});
+		options.push_back({std::string(kDebugMenuKeyLicenseUnlicensed), "License: force Unlicensed"});
+		options.push_back({std::string(kDebugMenuKeyLicenseClear), "License: clear override"});
+	}
+	ParameterSpec spec = ParameterSpec::menuParam(id, std::move(key), "Debug", std::move(options), 0);
 	spec.hostFlags = HostFlag::NotAnimatable | HostFlag::NoEvaluateOnChange | HostFlag::NoUndo | HostFlag::DontSave;
 	spec.appFlags = AppFlag::NoState | AppFlag::PresetNoValue | AppFlag::PresetNoTags | AppFlag::PresetNoMeta | AppFlag::NoDebug;
 	return spec;

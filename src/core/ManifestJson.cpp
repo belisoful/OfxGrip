@@ -58,6 +58,14 @@ bool readValue(const Json& j, Value& out)
 		return false;
 	}
 	if (j.is_object()) {
+		if (j.contains("red") && j.contains("green") && j.contains("blue")) {
+			if (j.contains("alpha")) {
+				out = Value(RGBA{j["red"].get<double>(), j["green"].get<double>(), j["blue"].get<double>(), j["alpha"].get<double>()});
+			} else {
+				out = Value(RGB{j["red"].get<double>(), j["green"].get<double>(), j["blue"].get<double>()});
+			}
+			return true;
+		}
 		if (j.contains("r") && j.contains("g") && j.contains("b")) {
 			if (j.contains("a")) {
 				out = Value(RGBA{j["r"].get<double>(), j["g"].get<double>(), j["b"].get<double>(), j["a"].get<double>()});
@@ -287,6 +295,15 @@ Error readParameter(const Json& j, const std::string& path, ParameterSpec& out)
 	if (j.contains("selector")) {
 		out.selector = j["selector"].get<std::string>();
 	}
+	// The kernel binding keys of a metadata record (KernelMetadata.hpp) ride on the meta map.
+	for (const auto& [json, meta] : {std::pair<const char*, const char*>{"constant", "kernelConstant"}, {"pixelUnits", "kernelPixelUnits"}, {"allowContinuousConstant", "kernelContinuousConstant"}}) {
+		if (j.contains(json)) {
+			if (!j[json].is_boolean()) {
+				return fail(path + "." + json, "expected a boolean");
+			}
+			out.meta[meta] = Value(j[json].get<bool>());
+		}
+	}
 	if (j.contains("targetPresets")) {
 		const auto& presets = j["targetPresets"];
 		if (!presets.is_object()) {
@@ -421,12 +438,20 @@ Json writeParameter(const ParameterSpec& spec)
 	if (!spec.tags.empty()) {
 		j["tags"] = spec.tags;
 	}
-	if (!spec.meta.empty()) {
-		Json meta = Json::object();
-		for (const auto& [name, v] : spec.meta) {
-			meta[name] = writeValue(v);
+	Json specMeta = Json::object();
+	for (const auto& [name, v] : spec.meta) {
+		if (name == "kernelConstant") {
+			j["constant"] = v.toBool(false);
+		} else if (name == "kernelPixelUnits") {
+			j["pixelUnits"] = v.toBool(false);
+		} else if (name == "kernelContinuousConstant") {
+			j["allowContinuousConstant"] = v.toBool(false);
+		} else {
+			specMeta[name] = writeValue(v);
 		}
-		j["meta"] = meta;
+	}
+	if (!specMeta.empty()) {
+		j["meta"] = specMeta;
 	}
 	if (!spec.visibleWhen.empty()) {
 		j["visibleWhen"] = spec.visibleWhen;
@@ -495,6 +520,20 @@ Json writeParameter(const ParameterSpec& spec)
 }
 
 }  // namespace
+
+Error parseParameterListJson(std::string_view json, std::vector<ParameterSpec>& out)
+{
+	Json root = Json::parse(json, nullptr, false, true);
+	if (root.is_discarded()) {
+		return fail("$", "not valid JSON");
+	}
+	std::vector<ParameterSpec> specs;
+	if (Error e = readParameters(root, "$", specs)) {
+		return e;
+	}
+	out = std::move(specs);
+	return Error::none();
+}
 
 Error parseManifestJson(std::string_view json, EffectManifest& out)
 {
@@ -611,6 +650,56 @@ Error parseManifestJson(std::string_view json, EffectManifest& out)
 					return fail("$.effect.properties." + name, "unreadable value");
 				}
 				m.properties[name] = std::move(value);
+			}
+		}
+	}
+	if (root.contains("licensing")) {
+		const Json& l = root["licensing"];
+		if (!l.is_object()) {
+			return fail("$.licensing", "expected an object");
+		}
+		LicensingSpec& spec = m.licensing;
+		spec.provider = l.value("provider", "");
+		spec.productId = l.value("productId", "");
+		spec.productVersion = l.value("productVersion", "");
+		spec.licensedVersion = l.value("licensedVersion", "");
+		spec.releaseDate = l.value("releaseDate", "");
+		spec.watermarkUnlicensed = l.value("watermarkUnlicensed", true);
+		spec.watermarkTrial = l.value("watermarkTrial", false);
+		spec.showBuyButton = l.value("showBuyButton", true);
+		spec.showProductButton = l.value("showProductButton", true);
+		spec.autoChecking = l.value("autoChecking", true);
+		for (const auto& [name, target] : {std::pair<const char*, std::optional<WatermarkConfiguration>*>{"unlicensedWatermark", &spec.unlicensedWatermark}, {"trialWatermark", &spec.trialWatermark}}) {
+			if (!l.contains(name)) {
+				continue;
+			}
+			if (!l[name].is_object()) {
+				return fail(std::string("$.licensing.") + name, "expected an object");
+			}
+			std::map<std::string, Value> dictionary;
+			for (const auto& [field, v] : l[name].items()) {
+				Value value;
+				if (!readValue(v, value)) {
+					return fail(std::string("$.licensing.") + name + "." + field, "unreadable value");
+				}
+				dictionary[field] = std::move(value);
+			}
+			WatermarkConfiguration configuration = std::string(name) == "trialWatermark" ? WatermarkConfiguration::trial("") : WatermarkConfiguration::unlicensed("");
+			if (Error e = configuration.apply(dictionary)) {
+				return fail(std::string("$.licensing.") + name, e.message());
+			}
+			*target = configuration;
+		}
+		if (l.contains("settings")) {
+			if (!l["settings"].is_object()) {
+				return fail("$.licensing.settings", "expected an object");
+			}
+			for (const auto& [name, v] : l["settings"].items()) {
+				Value value;
+				if (!readValue(v, value)) {
+					return fail("$.licensing.settings." + name, "unreadable value");
+				}
+				spec.settings[name] = std::move(value);
 			}
 		}
 	}
@@ -822,6 +911,46 @@ std::string writeManifestJson(const EffectManifest& m)
 		effect["properties"] = props;
 	}
 	root["effect"] = effect;
+	if (!m.licensing.empty()) {
+		const LicensingSpec& spec = m.licensing;
+		Json l = Json::object();
+		l["provider"] = spec.provider;
+		if (!spec.productId.empty()) {
+			l["productId"] = spec.productId;
+		}
+		if (!spec.productVersion.empty()) {
+			l["productVersion"] = spec.productVersion;
+		}
+		if (!spec.licensedVersion.empty()) {
+			l["licensedVersion"] = spec.licensedVersion;
+		}
+		if (!spec.releaseDate.empty()) {
+			l["releaseDate"] = spec.releaseDate;
+		}
+		l["watermarkUnlicensed"] = spec.watermarkUnlicensed;
+		l["watermarkTrial"] = spec.watermarkTrial;
+		l["showBuyButton"] = spec.showBuyButton;
+		l["showProductButton"] = spec.showProductButton;
+		l["autoChecking"] = spec.autoChecking;
+		for (const auto& [name, configuration] : {std::pair<const char*, const std::optional<WatermarkConfiguration>*>{"unlicensedWatermark", &spec.unlicensedWatermark}, {"trialWatermark", &spec.trialWatermark}}) {
+			if (!configuration->has_value()) {
+				continue;
+			}
+			Json mark = Json::object();
+			for (const auto& [field, v] : (*configuration)->toDictionary()) {
+				mark[field] = writeValue(v);
+			}
+			l[name] = mark;
+		}
+		if (!spec.settings.empty()) {
+			Json settings = Json::object();
+			for (const auto& [name, v] : spec.settings) {
+				settings[name] = writeValue(v);
+			}
+			l["settings"] = settings;
+		}
+		root["licensing"] = l;
+	}
 	if (!m.clips.empty()) {
 		Json clips = Json::array();
 		for (const ClipSpec& c : m.clips) {

@@ -18,13 +18,21 @@
 
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 OFXGRIP_NAMESPACE_BEGIN
 
 /*! The choice parameter that presents the menu: `Debug`, `Reveal hidden parameters`,
-    `Hide parameters again`. */
-ParameterSpec debugMenuParameter(ParameterId id, std::string key);
+    `Hide parameters again`, and with `licensing` the rows that force a license status for a
+    debug session (`licenseLicensed`, `licenseTrial`, `licenseUnlicensed`, `licenseClear`). */
+ParameterSpec debugMenuParameter(ParameterId id, std::string key, bool licensing = false);
+
+/*! The option keys of the debug menu's licensing rows. Introduced in OfxGrip 0.4.0. */
+inline constexpr std::string_view kDebugMenuKeyLicenseLicensed = "licenseLicensed";
+inline constexpr std::string_view kDebugMenuKeyLicenseTrial = "licenseTrial";
+inline constexpr std::string_view kDebugMenuKeyLicenseUnlicensed = "licenseUnlicensed";
+inline constexpr std::string_view kDebugMenuKeyLicenseClear = "licenseClear";
 
 /*! The extension. */
 class DebugExtension final : public Extension {

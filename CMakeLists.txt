@@ -35,6 +35,7 @@ endif()
 
 include(OfxGripCompiler)
 include(OfxGripPlugin)
+include(OfxGripKernels)
 
 add_subdirectory(src)
 

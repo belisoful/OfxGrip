@@ -4,6 +4,7 @@
 
 #include <ofxgrip/core/About.hpp>
 #include <ofxgrip/core/Debug.hpp>
+#include <ofxgrip/core/Licensing.hpp>
 #include <ofxgrip/core/Presets.hpp>
 
 #include <ofxgrip/ofx/Actions.hpp>
@@ -295,7 +296,12 @@ std::vector<ParameterSpec> frameworkParameters(const EffectManifest& manifest, b
 		out.push_back(aboutMenuParameter(manifest.about, kParameterIdAboutMenu, kAboutMenuParameterKey));
 	}
 	if (debugAllowed && manifest.property("debugMenu", false)) {
-		out.push_back(debugMenuParameter(kParameterIdDebugMenu, kDebugMenuParameterKey));
+		out.push_back(debugMenuParameter(kParameterIdDebugMenu, kDebugMenuParameterKey, !manifest.licensing.empty()));
+	}
+	if (!manifest.licensing.empty()) {
+		std::shared_ptr<LicensingProvider> provider = LicensingProviders::create(manifest.licensing.provider, manifest.licensing.settings);
+		out.push_back(licenseStatusParameter(kParameterIdLicenseStatus, kLicenseStatusParameterKey));
+		out.push_back(licensingMenuParameter(manifest.licensing, provider.get(), kParameterIdLicensingMenu, kLicensingMenuParameterKey));
 	}
 	ParameterSpec state = ParameterSpec::stringParam(kParameterIdInstanceState, kInstanceStateParameterKey, "OfxGrip State", "");
 	state.hostFlags = HostFlag::Hidden | HostFlag::NotAnimatable | HostFlag::NoEvaluateOnChange | HostFlag::NoUndo;
@@ -304,7 +310,7 @@ std::vector<ParameterSpec> frameworkParameters(const EffectManifest& manifest, b
 	return out;
 }
 
-Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, LoweringReport& report)
+Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& profile, const Suites& suites, OfxImageEffectHandle descriptor, LoweringReport& report, OfxPluginEntryPoint* overlayEntry)
 {
 	OfxPropertySetHandle handle = nullptr;
 	if (suites.imageEffect->getPropertySet(descriptor, &handle) != kOfxStatOK || handle == nullptr) {
@@ -360,6 +366,14 @@ Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& p
 	props.trySetString(kOfxImageEffectPropOpenCLRenderSupported, cap.openCLRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(kOfxImageEffectPropCPURenderSupported, cap.cpuRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(resolve::kPropNoSpatialAwareness, cap.noSpatialAwareness ? "true" : "false", &report.rejectedProperties);
+	if (overlayEntry != nullptr && manifest.property("overlay", false) && profile.capabilities.supportsOverlays) {
+		// The draw-suite interact where the host vends the suite (Resolve does: Q-RESOLVE-019's
+		// live scan), the OpenGL interact elsewhere.
+		const char* name = profile.suites.draw ? kOfxImageEffectPluginPropOverlayInteractV2 : kOfxImageEffectPluginPropOverlayInteractV1;
+		if (Error e = props.setPointer(name, reinterpret_cast<void*>(overlayEntry))) {
+			report.warnings.push_back(std::string("overlay interact rejected: ") + e.describe());
+		}
+	}
 	return Error::none();
 }
 

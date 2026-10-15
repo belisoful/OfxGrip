@@ -2,6 +2,7 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/ofx/Effect.hpp>
 
+#include <ofxgrip/core/LicensingProviders.hpp>
 #include <ofxgrip/ofx/Descriptor.hpp>
 
 #include <algorithm>
@@ -115,6 +116,10 @@ Error Effect::onEndSequenceRender(const SequenceRenderArgs&)
 {
 	return Error::none();
 }
+std::unique_ptr<OverlayControl> Effect::createOverlay(OverlayParameters&)
+{
+	return nullptr;
+}
 
 void Effect::attach(std::unique_ptr<OfxHostServices> services, const CreateInstanceArgs& args)
 {
@@ -181,6 +186,36 @@ void Effect::loadFrameworkExtensions()
 	if (m.property("regression", false)) {
 		regressionExtension_ = static_cast<RegressionExtension*>(extensions_->load(std::make_unique<RegressionExtension>()));
 	}
+	if (!m.licensing.empty() && services_->binding(kParameterIdLicenseStatus) != nullptr) {
+		std::shared_ptr<LicensingProvider> provider = services_->licensingProvider();
+		if (!provider) {
+			provider = LicensingProviders::create(m.licensing.provider, m.licensing.settings);
+		}
+		if (!provider) {
+			services_->log().warning("No licensing provider is registered under " + m.licensing.provider);
+		}
+		if (auto* trial = dynamic_cast<TrialLicensingProvider*>(provider.get()); trial != nullptr && trial->directory().empty()) {
+			trial->setDirectory(services_->paths().userSupportDirectory());
+		}
+		if (auto* file = dynamic_cast<FileLicensingProvider*>(provider.get()); file != nullptr && file->directory().empty()) {
+			file->setDirectory(services_->paths().userSupportDirectory());
+		}
+		const ParameterId debugMenu = services_->binding(kParameterIdDebugMenu) != nullptr ? kParameterIdDebugMenu : kParameterIdNone;
+		licensingExtension_ = static_cast<LicensingExtension*>(extensions_->load(std::make_unique<LicensingExtension>(provider, m.licensing, kParameterIdLicenseStatus, kParameterIdLicensingMenu, debugMenu)));
+	}
+}
+
+std::shared_ptr<LicensingProvider> EffectFactory::licensingProvider()
+{
+	std::lock_guard<std::mutex> lock(licensingMutex_);
+	if (!licensingProviderCreated_) {
+		licensingProviderCreated_ = true;
+		const LicensingSpec& spec = manifest().licensing;
+		if (!spec.empty()) {
+			licensingProvider_ = LicensingProviders::create(spec.provider, spec.settings);
+		}
+	}
+	return licensingProvider_;
 }
 
 FrameData* Effect::analysis()

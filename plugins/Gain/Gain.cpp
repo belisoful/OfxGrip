@@ -14,6 +14,9 @@
 #if defined(OFXGRIP_HAS_METAL)
 #include <ofxgrip/gpu/MetalBackend.hpp>
 #endif
+#if defined(OFXGRIP_HAS_OPENCL)
+#include <ofxgrip/gpu/OpenCLBackend.hpp>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -45,13 +48,16 @@ EffectManifest makeManifest()
 	m.identity.description = "Multiplies each channel by a gain. The OfxGrip sample effect.";
 	m.identity.kind = EffectKind::Filter;
 	m.identity.extraContexts = {EffectKind::General};
-	m.version = Version{1, 2, 0};
+	m.version = Version{1, 3, 0};
 	m.capabilities.supportsTiles = true;
 	m.capabilities.supportsMultiResolution = true;
 	m.capabilities.noSpatialAwareness = true;
 	m.capabilities.depths = {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float};
 #if defined(OFXGRIP_HAS_METAL)
 	m.capabilities.metalRender = true;
+#endif
+#if defined(OFXGRIP_HAS_OPENCL)
+	m.capabilities.openCLRender = true;
 #endif
 
 	m.parameters.push_back(ParameterSpec::floatParam(kGain, "gain", "Gain", 1.0, 0.0, 10.0).withDisplayRange(0.0, 4.0).withHint("Multiplies every channel.").withTags({"gain"}));
@@ -70,9 +76,9 @@ EffectManifest makeManifest()
 	return m;
 }
 
-#if defined(OFXGRIP_HAS_METAL)
+#if defined(OFXGRIP_HAS_METAL) || defined(OFXGRIP_HAS_OPENCL)
 
-/*! The kernel arguments. The layout matches `GainParams` in the shader source. */
+/*! The kernel arguments. The layout matches `GainParams` in the Metal and OpenCL sources. */
 struct GainParams {
 	float gain[4];
 	int clampResult;
@@ -85,6 +91,77 @@ struct GainParams {
 	int srcRowBytes;
 	int dstRowBytes;
 };
+
+/*! Fills the arguments shared by the GPU paths: the gains, the layouts, and the window. */
+GainParams gainParamsFor(const RenderContext& context, const GpuImage& out, const GpuImage* in, void (*readGains)(const RenderSnapshot&, float[4]))
+{
+	GainParams params{};
+	readGains(context.snapshot, params.gain);
+	params.clampResult = context.snapshot.integer(kClamp) == 1 ? 1 : 0;
+	params.components = static_cast<int>(componentCount(out.desc.components));
+	params.hasSource = in != nullptr ? 1 : 0;
+	params.dstX1 = out.desc.bounds.x1;
+	params.dstY1 = out.desc.bounds.y1;
+	params.dstX2 = out.desc.bounds.x2;
+	params.dstY2 = out.desc.bounds.y2;
+	params.dstRowBytes = static_cast<int>(out.rowBytes);
+	const RectI window = context.args.renderWindow.empty() ? out.desc.bounds : context.args.renderWindow.intersect(out.desc.bounds);
+	params.winX1 = window.x1;
+	params.winY1 = window.y1;
+	params.winX2 = window.x2;
+	params.winY2 = window.y2;
+	if (in != nullptr) {
+		params.srcComponents = static_cast<int>(componentCount(in->desc.components));
+		params.srcX1 = in->desc.bounds.x1;
+		params.srcY1 = in->desc.bounds.y1;
+		params.srcX2 = in->desc.bounds.x2;
+		params.srcY2 = in->desc.bounds.y2;
+		params.srcRowBytes = static_cast<int>(in->rowBytes);
+	}
+	return params;
+}
+
+#endif
+
+#if defined(OFXGRIP_HAS_OPENCL)
+
+/*! The same arithmetic as the Metal kernels, in OpenCL C: one kernel per depth over byte
+    buffers. Half frames go through the core `vload_half`/`vstore_half`, which every OpenCL
+    1.2 device has. */
+constexpr const char* kGainOpenCL = R"CL(
+typedef struct {
+    float gain[4];
+    int clampResult;
+    int components;
+    int hasSource;
+    int srcComponents;
+    int srcX1, srcY1, srcX2, srcY2;
+    int dstX1, dstY1, dstX2, dstY2;
+    int winX1, winY1, winX2, winY2;
+    int srcRowBytes;
+    int dstRowBytes;
+} GainParams;
+
+#define GAIN_KERNEL(NAME, T, TO_UNIT, FROM_UNIT)                                                        __kernel void NAME(__global const uchar* src, __global uchar* dst, GainParams p)                       {                                                                                                           const int x = p.winX1 + (int)get_global_id(0);                                                          const int y = p.winY1 + (int)get_global_id(1);                                                          if (x >= p.winX2 || y >= p.winY2) { return; }                                                           if (x < p.dstX1 || x >= p.dstX2 || y < p.dstY1 || y >= p.dstY2) { return; }                             __global T* d = (__global T*)(dst + (y - p.dstY1) * p.dstRowBytes) + (x - p.dstX1) * p.components;      const int inSource = p.hasSource != 0 && x >= p.srcX1 && x < p.srcX2 && y >= p.srcY1 && y < p.srcY2;     if (!inSource) {                                                                                            for (int c = 0; c < p.components; ++c) { FROM_UNIT(0.0f, d + c); }                                      return;                                                                                             }                                                                                                       __global const T* s = (__global const T*)(src + (y - p.srcY1) * p.srcRowBytes) + (x - p.srcX1) * p.srcComponents;     for (int c = 0; c < p.components; ++c) {                                                                    const int gainIndex = p.components == 1 ? 3 : c;                                                        float v = TO_UNIT(s + c) * p.gain[gainIndex];                                                           if (p.clampResult != 0) { v = clamp(v, 0.0f, 1.0f); }                                                   FROM_UNIT(v, d + c);                                                                                }                                                                                                   }
+
+#define TO_UNIT_UCHAR(ptr) ((float)(*(ptr)) / 255.0f)
+#define FROM_UNIT_UCHAR(v, ptr) (*(ptr) = convert_uchar_sat_rte((v) * 255.0f))
+#define TO_UNIT_USHORT(ptr) ((float)(*(ptr)) / 65535.0f)
+#define FROM_UNIT_USHORT(v, ptr) (*(ptr) = convert_ushort_sat_rte((v) * 65535.0f))
+#define TO_UNIT_HALF(ptr) vload_half(0, (ptr))
+#define FROM_UNIT_HALF(v, ptr) vstore_half_rte((v), 0, (ptr))
+#define TO_UNIT_FLOAT(ptr) (*(ptr))
+#define FROM_UNIT_FLOAT(v, ptr) (*(ptr) = (v))
+
+GAIN_KERNEL(gain_byte, uchar, TO_UNIT_UCHAR, FROM_UNIT_UCHAR)
+GAIN_KERNEL(gain_short, ushort, TO_UNIT_USHORT, FROM_UNIT_USHORT)
+GAIN_KERNEL(gain_half, half, TO_UNIT_HALF, FROM_UNIT_HALF)
+GAIN_KERNEL(gain_float, float, TO_UNIT_FLOAT, FROM_UNIT_FLOAT)
+)CL";
+
+#endif
+
+#if defined(OFXGRIP_HAS_METAL)
 
 constexpr const char* kGainShader = R"MSL(
 #include <metal_stdlib>
@@ -163,6 +240,10 @@ kernel void gain_float(device const uchar* src [[buffer(0)]], device uchar* dst 
 }
 )MSL";
 
+#endif
+
+#if defined(OFXGRIP_HAS_METAL) || defined(OFXGRIP_HAS_OPENCL)
+
 const char* kernelNameFor(BitDepth depth) noexcept
 {
 	switch (depth) {
@@ -202,6 +283,11 @@ public:
 #if defined(OFXGRIP_HAS_METAL)
 			if (context.outputGpu.api == GpuApi::Metal) {
 				return renderMetal(context);
+			}
+#endif
+#if defined(OFXGRIP_HAS_OPENCL)
+			if (context.outputGpu.api == GpuApi::OpenCL) {
+				return renderOpenCL(context);
 			}
 #endif
 			return Error::make(ErrorCode::Unsupported, "This GPU API is not supported").with("api", std::string(toString(context.outputGpu.api)));
@@ -272,21 +358,8 @@ private:
 		if (hasSource && source->gpu.desc.depth != out.desc.depth) {
 			return Error::make(ErrorCode::Format, "The Metal source and output frames differ in depth");
 		}
-		GainParams params{};
-		readGains(context.snapshot, params.gain);
-		params.clampResult = context.snapshot.integer(kClamp) == 1 ? 1 : 0;
-		params.components = static_cast<int>(componentCount(out.desc.components));
-		params.hasSource = hasSource ? 1 : 0;
-		params.dstX1 = out.desc.bounds.x1;
-		params.dstY1 = out.desc.bounds.y1;
-		params.dstX2 = out.desc.bounds.x2;
-		params.dstY2 = out.desc.bounds.y2;
-		params.dstRowBytes = static_cast<int>(out.rowBytes);
-		const RectI window = context.args.renderWindow.empty() ? out.desc.bounds : context.args.renderWindow.intersect(out.desc.bounds);
-		params.winX1 = window.x1;
-		params.winY1 = window.y1;
-		params.winX2 = window.x2;
-		params.winY2 = window.y2;
+		const GainParams params = gainParamsFor(context, out, hasSource ? &source->gpu : nullptr, &readGains);
+		const RectI window = RectI{params.winX1, params.winY1, params.winX2, params.winY2};
 
 		metal::MetalCommandBuffer command = backend->commandBuffer();
 		if (!command.valid()) {
@@ -295,12 +368,6 @@ private:
 		void* sourceHandle = out.handle;
 		if (hasSource) {
 			const GpuImage& in = source->gpu;
-			params.srcComponents = static_cast<int>(componentCount(in.desc.components));
-			params.srcX1 = in.desc.bounds.x1;
-			params.srcY1 = in.desc.bounds.y1;
-			params.srcX2 = in.desc.bounds.x2;
-			params.srcY2 = in.desc.bounds.y2;
-			params.srcRowBytes = static_cast<int>(in.rowBytes);
 			sourceHandle = in.handle;
 			if (in.needsIntermediateCopy) {
 				// Q-RESOLVE-031: on the Fusion page the host's buffers are not read in place.
@@ -327,6 +394,39 @@ private:
 		}
 		// Commit without waiting, as ofxGPURender.h asks; the host synchronizes the queue.
 		return command.commit();
+	}
+#endif
+
+#if defined(OFXGRIP_HAS_OPENCL)
+	Error renderOpenCL(RenderContext& context)
+	{
+		const GpuImage& out = context.outputGpu;
+		const char* kernelName = kernelNameFor(out.desc.depth);
+		if (kernelName == nullptr || out.handle == nullptr) {
+			return Error::make(ErrorCode::Format, "The OpenCL output frame is unusable");
+		}
+		std::shared_ptr<opencl::OpenCLContext> backend = opencl::OpenCLContext::forQueue(out.queue);
+		if (!backend) {
+			return Error::make(ErrorCode::MissingHostFeature, "The host passed no OpenCL command queue");
+		}
+		opencl::OpenCLKernel kernel;
+		if (Error e = backend->kernel("ofxgrip.gain", kGainOpenCL, kernelName, kernel)) {
+			return e;
+		}
+		const InputImage* source = context.source();
+		const bool hasSource = source != nullptr && source->connected && source->gpu.handle != nullptr;
+		if (hasSource && source->gpu.desc.depth != out.desc.depth) {
+			return Error::make(ErrorCode::Format, "The OpenCL source and output frames differ in depth");
+		}
+		const GainParams params = gainParamsFor(context, out, hasSource ? &source->gpu : nullptr, &readGains);
+		opencl::OpenCLDispatch dispatch;
+		dispatch.kernel = kernel;
+		dispatch.globalSize[0] = static_cast<std::size_t>(std::max(0, params.winX2 - params.winX1));
+		dispatch.globalSize[1] = static_cast<std::size_t>(std::max(0, params.winY2 - params.winY1));
+		dispatch.buffers = {{hasSource ? source->gpu.handle : out.handle, 0}, {out.handle, 1}};
+		dispatch.bytes = {{&params, sizeof params, 2}};
+		// Enqueue without waiting, as ofxGPURender.h asks; the host synchronizes the queue.
+		return backend->enqueue(dispatch);
 	}
 #endif
 };

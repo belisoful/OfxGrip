@@ -8,6 +8,9 @@
 #if defined(OFXGRIP_HAS_METAL)
 #include <ofxgrip/gpu/MetalBackend.hpp>
 #endif
+#if defined(OFXGRIP_HAS_OPENCL)
+#include <ofxgrip/gpu/OpenCLBackend.hpp>
+#endif
 
 #include "ofxGPURender.h"
 #include "ofxParam.h"
@@ -393,6 +396,52 @@ TEST(HostDumpBundleMetal, CopiesTheSourceThroughABlit)
 	EXPECT_EQ(readComponent(cleared.image.view().pixel(5, 5), BitDepth::Float, 0), 0.0f);
 	instance.reset();
 	host.unload();
+}
+
+#endif
+
+#if defined(OFXGRIP_HAS_OPENCL)
+
+TEST_F(GainBundle, OpenCLRenderMatchesTheCpuRenderAcrossDepths)
+{
+	if (!opencl::OpenCLContext::available()) {
+		GTEST_SKIP() << "No OpenCL device";
+	}
+	HostOptions options = HostOptions::spec();
+	options.openCLRenderSupported = true;
+	start(options);
+	EXPECT_EQ(host_->descriptorProps()->getString(kOfxImageEffectPropOpenCLRenderSupported), "true");
+	instance_->setParam("gain", {0.5});
+	instance_->setParam("perChannel", {1.0});
+	instance_->setParam("gainB", {2.0});
+	for (BitDepth depth : {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float}) {
+		instance_->setInput("Source", makeRampImage(32, 16, depth));
+		RenderRequest cpu;
+		cpu.depth = depth;
+		RenderResult a = instance_->render(cpu);
+		RenderRequest gpu = cpu;
+		gpu.gpu = GpuApi::OpenCL;
+		gpu.tileSize = 10;
+		RenderResult b = instance_->render(gpu);
+		ASSERT_TRUE(a.ok() && b.ok()) << toString(depth);
+		ASSERT_EQ(b.gpu, GpuApi::OpenCL);
+		expectSameImage(a.image, b.image, depth, (std::string("opencl ") + std::string(toString(depth))).c_str());
+	}
+	instance_->disconnect("Source");
+	RenderRequest none;
+	none.gpu = GpuApi::OpenCL;
+	RenderResult disconnected = instance_->render(none);
+	ASSERT_TRUE(disconnected.ok());
+	EXPECT_EQ(disconnected.gpu, GpuApi::OpenCL);
+	EXPECT_EQ(readComponent(disconnected.image.view().pixel(3, 3), BitDepth::Float, 0), 0.0f);
+	// Without host support the request falls back to CPU frames.
+	instance_.reset();
+	host_.reset();
+	start(HostOptions::spec());
+	instance_->setInput("Source", makeRampImage(8, 8, BitDepth::Float));
+	RenderResult fallback = instance_->render(none);
+	ASSERT_TRUE(fallback.ok());
+	EXPECT_EQ(fallback.gpu, GpuApi::None);
 }
 
 #endif

@@ -55,6 +55,8 @@ public:
 	/*! Trampoline targets. */
 	void setHost(int index, OfxHost* host);
 	OfxStatus mainEntry(int index, const char* action, const void* handle, OfxPropertySetHandle inArgs, OfxPropertySetHandle outArgs);
+	/*! The overlay interact's entry for a slot (phase 3). */
+	OfxStatus interactEntry(int index, const char* action, const void* handle, OfxPropertySetHandle inArgs, OfxPropertySetHandle outArgs);
 
 private:
 	PluginRegistry();

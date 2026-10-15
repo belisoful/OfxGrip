@@ -15,6 +15,7 @@
 #include <ofxgrip/core/Events.hpp>
 #include <ofxgrip/core/HostProfile.hpp>
 #include <ofxgrip/core/HostServices.hpp>
+#include <ofxgrip/core/Licensing.hpp>
 #include <ofxgrip/core/Manifest.hpp>
 #include <ofxgrip/ofx/PropertySet.hpp>
 #include <ofxgrip/ofx/Suites.hpp>
@@ -126,6 +127,10 @@ public:
 	    before `bind`. */
 	void setDebugFeaturesAllowed(bool allowed) noexcept { debugAllowed_ = allowed; }
 	bool debugFeaturesAllowed() const noexcept { return debugAllowed_; }
+	/*! The licensing provider the plug-in's instances share, or null to create one from the
+	    manifest. Set before `attach`. Introduced in OfxGrip 0.4.0. */
+	void setLicensingProvider(std::shared_ptr<LicensingProvider> provider) { licensingProvider_ = std::move(provider); }
+	const std::shared_ptr<LicensingProvider>& licensingProvider() const noexcept { return licensingProvider_; }
 
 private:
 	struct Impl;
@@ -144,6 +149,7 @@ private:
 	std::map<std::string, OfxImageClipHandle> clips_;
 	std::string resolvePage_;
 	bool debugAllowed_{true};
+	std::shared_ptr<LicensingProvider> licensingProvider_;
 	std::unique_ptr<Impl> impl_;
 };
 

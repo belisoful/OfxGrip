@@ -408,6 +408,21 @@ Error EffectManifest::validate() const
 	if (capabilities.depths.empty()) {
 		return fail("The effect supports no bit depth", nullptr);
 	}
+	if (!licensing.empty()) {
+		Version v;
+		if (!licensing.productVersion.empty() && !Version::parse(licensing.productVersion, v)) {
+			return fail("The licensing product version does not parse", nullptr);
+		}
+		if (!licensing.licensedVersion.empty() && licensing.licensedVersion != "*" && !Version::parse(licensing.licensedVersion, v)) {
+			return fail("The licensed version does not parse", nullptr);
+		}
+		if (licensing.unlicensedWatermark && licensing.unlicensedWatermark->opacity < 0) {
+			return fail("The unlicensed watermark opacity is negative", nullptr);
+		}
+		if (licensing.trialWatermark && licensing.trialWatermark->opacity < 0) {
+			return fail("The trial watermark opacity is negative", nullptr);
+		}
+	}
 	std::set<std::string> clipNames;
 	for (const ClipSpec& clip : clips) {
 		if (clip.name.empty()) {

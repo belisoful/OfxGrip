@@ -457,6 +457,7 @@ TEST_F(CContract, NullHandlesAreSafe)
 	EXPECT_EQ(ofxgrip_snapshot_time(nullptr), 0.0);
 	EXPECT_EQ(ofxgrip_snapshot_frame_rate(nullptr), 0.0);
 	EXPECT_EQ(ofxgrip_snapshot_page(nullptr, buffer, sizeof buffer), 0u);
+	EXPECT_EQ(ofxgrip_snapshot_license_state(nullptr), OFXGRIP_LICENSE_UNKNOWN);
 	EXPECT_EQ(ofxgrip_bytes_per_component(OFXGRIP_DEPTH_UINT16), 2);
 	EXPECT_EQ(ofxgrip_bytes_per_component(99), 0);
 	EXPECT_EQ(ofxgrip_read_component(nullptr, OFXGRIP_DEPTH_FLOAT, 0), 0.0f);
@@ -497,6 +498,7 @@ TEST_F(CContract, SnapshotAccessorsCoverEveryKind)
 			EXPECT_EQ(ofxgrip_snapshot_has(snapshot, kGain), 1);
 			EXPECT_EQ(ofxgrip_snapshot_has(snapshot, kButton), 0);
 			EXPECT_EQ(ofxgrip_snapshot_frame_rate(snapshot), 24.0);
+			EXPECT_EQ(ofxgrip_snapshot_license_state(snapshot), OFXGRIP_LICENSE_UNKNOWN);
 			EXPECT_EQ(ofxgrip_snapshot_time(snapshot), 2.0);
 			int32_t connected = 1;
 			ofxgrip_image in{};

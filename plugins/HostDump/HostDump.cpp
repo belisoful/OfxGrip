@@ -53,11 +53,12 @@ EffectManifest makeManifest()
 	m.identity.description = "Records the host's capabilities and behavior to the OfxGrip log. Passes the image through.";
 	m.identity.kind = EffectKind::Filter;
 	m.identity.extraContexts = {EffectKind::General, EffectKind::Generator};
-	m.version = Version{1, 2, 0};
+	m.version = Version{1, 3, 0};
 	m.capabilities.depths = {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float};
 #if defined(OFXGRIP_HAS_METAL)
 	m.capabilities.metalRender = true;
 #endif
+	m.properties["overlay"] = Value(true);
 
 	// One of each kind, with and without ranges, so Q-RESOLVE-004 and Q-RESOLVE-015 can be read
 	// back from the instance.
@@ -91,8 +92,38 @@ EffectManifest makeManifest()
 	return m;
 }
 
+/*! The overlay probe: a handle on the probe point and a readout of the interact arguments the
+    host passes (Q-RESOLVE-023, Q-OFX-ANY-006, Q-OFX-ANY-012), logged once per distinct value. */
+class ProbeOverlay final : public OverlayControl {
+public:
+	ProbeOverlay(OverlayParameters& parameters, LogService& log) : OverlayControl(parameters), log_(log)
+	{
+		addPart(std::make_unique<PointHandlePart>(1, kProbePoint));
+		auto hud = std::make_unique<HudPart>(2, "");
+		hud->textProvider = [](const OverlayGeometry& g) {
+			return "OfxGrip probe: pixelScale " + std::to_string(g.pixelScale.x) + "," + std::to_string(g.pixelScale.y) + " ratio " + std::to_string(g.screenPixelRatio);
+		};
+		addPart(std::move(hud));
+	}
+	void drawBackground(DrawKit&, const OverlayGeometry& g) override
+	{
+		const std::string line = "overlay draw pixelScale=" + std::to_string(g.pixelScale.x) + "," + std::to_string(g.pixelScale.y) + " screenPixelRatio=" + std::to_string(g.screenPixelRatio) + " image=" + std::to_string(g.imageBounds.x1) + ","
+		                         + std::to_string(g.imageBounds.y1) + "," + std::to_string(g.imageBounds.x2) + "," + std::to_string(g.imageBounds.y2) + " time=" + std::to_string(g.time);
+		if (line != lastLine_) {
+			log_.info(line);
+			lastLine_ = line;
+		}
+	}
+
+private:
+	LogService& log_;
+	std::string lastLine_;
+};
+
 class HostDumpEffect final : public Effect {
 public:
+	std::unique_ptr<OverlayControl> createOverlay(OverlayParameters& parameters) override { return std::make_unique<ProbeOverlay>(parameters, services().log()); }
+
 	Error onCreate() override
 	{
 		dumpInstance("create");

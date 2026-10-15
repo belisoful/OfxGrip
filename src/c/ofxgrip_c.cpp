@@ -886,6 +886,19 @@ size_t ofxgrip_snapshot_page(const ofxgrip_snapshot* snapshot, char* buffer, siz
 	return copyOut(snapshot->snapshot->info().resolvePage, buffer, length);
 }
 
+int32_t ofxgrip_snapshot_license_state(const ofxgrip_snapshot* snapshot)
+{
+	if (snapshot == nullptr || snapshot->snapshot == nullptr) {
+		return OFXGRIP_LICENSE_UNKNOWN;
+	}
+	switch (snapshot->snapshot->license()) {
+	case LicenseState::Licensed: return OFXGRIP_LICENSE_LICENSED;
+	case LicenseState::Trial: return OFXGRIP_LICENSE_TRIAL;
+	case LicenseState::Unlicensed: return OFXGRIP_LICENSE_UNLICENSED;
+	default: return OFXGRIP_LICENSE_UNKNOWN;
+	}
+}
+
 // ---- pixels -------------------------------------------------------------------------------------
 
 int32_t ofxgrip_bytes_per_component(int32_t depth)

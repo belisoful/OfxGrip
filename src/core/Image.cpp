@@ -106,6 +106,8 @@ ImageView ImageBuffer::view() const noexcept
 
 namespace {
 
+}  // namespace
+
 float halfToFloat(std::uint16_t h) noexcept
 {
 	const std::uint32_t sign = static_cast<std::uint32_t>(h >> 15) << 31;
@@ -164,8 +166,6 @@ std::uint16_t floatToHalf(float f) noexcept
 	}
 	return static_cast<std::uint16_t>(sign | half);
 }
-
-}  // namespace
 
 float readComponent(const std::uint8_t* pixel, BitDepth depth, std::size_t component) noexcept
 {

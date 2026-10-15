@@ -105,10 +105,14 @@ struct DeviceCache {
 	std::mutex mutex;
 	std::map<std::string, MTL::Library*> libraries;
 	std::map<std::string, std::shared_ptr<const MetalPipeline::Impl>> pipelines;
+	MTL::SamplerState* bilinear{nullptr};
 	~DeviceCache()
 	{
 		for (auto& [name, library] : libraries) {
 			library->release();
+		}
+		if (bilinear != nullptr) {
+			bilinear->release();
 		}
 	}
 };
@@ -167,18 +171,127 @@ void* MetalBuffer::contents() const noexcept
 	return impl_ ? impl_->buffer->contents() : nullptr;
 }
 
+// ---- pixel formats and textures -----------------------------------------------------------------
+
+MetalPixelFormat metalPixelFormatFor(BitDepth depth, Components components) noexcept
+{
+	const bool rgba = components == Components::RGBA;
+	const bool alpha = components == Components::Alpha;
+	if (!rgba && !alpha) {
+		return MetalPixelFormat::Invalid;
+	}
+	switch (depth) {
+	case BitDepth::Float: return rgba ? MetalPixelFormat::RGBA32Float : MetalPixelFormat::R32Float;
+	case BitDepth::Half: return rgba ? MetalPixelFormat::RGBA16Float : MetalPixelFormat::R16Float;
+	case BitDepth::UInt16: return rgba ? MetalPixelFormat::RGBA16Unorm : MetalPixelFormat::R16Unorm;
+	case BitDepth::UInt8: return rgba ? MetalPixelFormat::RGBA8Unorm : MetalPixelFormat::R8Unorm;
+	case BitDepth::None: break;
+	}
+	return MetalPixelFormat::Invalid;
+}
+
+std::size_t metalPixelBytes(MetalPixelFormat format) noexcept
+{
+	switch (format) {
+	case MetalPixelFormat::RGBA32Float: return 16;
+	case MetalPixelFormat::RGBA16Float:
+	case MetalPixelFormat::RGBA16Unorm: return 8;
+	case MetalPixelFormat::RGBA8Unorm:
+	case MetalPixelFormat::R32Float: return 4;
+	case MetalPixelFormat::R16Float:
+	case MetalPixelFormat::R16Unorm: return 2;
+	case MetalPixelFormat::R8Unorm: return 1;
+	case MetalPixelFormat::Invalid: break;
+	}
+	return 0;
+}
+
+namespace {
+
+MTL::PixelFormat nativeFormat(MetalPixelFormat format) noexcept
+{
+	switch (format) {
+	case MetalPixelFormat::RGBA32Float: return MTL::PixelFormatRGBA32Float;
+	case MetalPixelFormat::RGBA16Float: return MTL::PixelFormatRGBA16Float;
+	case MetalPixelFormat::RGBA16Unorm: return MTL::PixelFormatRGBA16Unorm;
+	case MetalPixelFormat::RGBA8Unorm: return MTL::PixelFormatRGBA8Unorm;
+	case MetalPixelFormat::R32Float: return MTL::PixelFormatR32Float;
+	case MetalPixelFormat::R16Float: return MTL::PixelFormatR16Float;
+	case MetalPixelFormat::R16Unorm: return MTL::PixelFormatR16Unorm;
+	case MetalPixelFormat::R8Unorm: return MTL::PixelFormatR8Unorm;
+	case MetalPixelFormat::Invalid: break;
+	}
+	return MTL::PixelFormatInvalid;
+}
+
+}  // namespace
+
+struct MetalTexture::Impl {
+	MTL::Texture* texture{nullptr};
+	unsigned width{0};
+	unsigned height{0};
+	MetalPixelFormat format{MetalPixelFormat::Invalid};
+	~Impl()
+	{
+		if (texture != nullptr) {
+			texture->release();
+		}
+	}
+};
+
+void* MetalTexture::handle() const noexcept
+{
+	return impl_ ? impl_->texture : nullptr;
+}
+
+unsigned MetalTexture::width() const noexcept
+{
+	return impl_ ? impl_->width : 0;
+}
+
+unsigned MetalTexture::height() const noexcept
+{
+	return impl_ ? impl_->height : 0;
+}
+
+MetalPixelFormat MetalTexture::format() const noexcept
+{
+	return impl_ ? impl_->format : MetalPixelFormat::Invalid;
+}
+
 // ---- context ------------------------------------------------------------------------------------
 
 struct MetalContext::Impl {
+	/*! Resources a committed command buffer still reads. The Metal command buffer retains the
+	    Metal objects itself; this list keeps the wrappers, so a pooled scratch buffer stays out
+	    of the pool until the GPU is done with it. Swept on the next allocation. A completion
+	    handler would do the same, but it runs on a Metal thread the sanitizers cannot follow. */
+	struct InFlight {
+		MTL::CommandBuffer* buffer{nullptr};
+		std::vector<MetalBuffer> buffers;
+		std::vector<MetalTexture> textures;
+	};
 	MTL::Device* device{nullptr};
 	MTL::CommandQueue* queue{nullptr};
 	bool ownsQueue{false};
 	std::shared_ptr<DeviceCache> cache;
 	std::mutex poolMutex;
 	std::vector<MTL::Buffer*> pool;
+	std::mutex inFlightMutex;
+	std::vector<InFlight> inFlight;
 
 	~Impl()
 	{
+		std::vector<InFlight> pending;
+		{
+			std::lock_guard<std::mutex> lock(inFlightMutex);
+			pending.swap(inFlight);
+		}
+		for (InFlight& entry : pending) {
+			entry.buffers.clear();
+			entry.textures.clear();
+			entry.buffer->release();
+		}
 		for (MTL::Buffer* buffer : pool) {
 			buffer->release();
 		}
@@ -194,6 +307,34 @@ struct MetalContext::Impl {
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 		pool.push_back(buffer);
+	}
+
+	void hold(MTL::CommandBuffer* buffer, std::vector<MetalBuffer> buffers, std::vector<MetalTexture> textures)
+	{
+		std::lock_guard<std::mutex> lock(inFlightMutex);
+		inFlight.push_back({buffer->retain(), std::move(buffers), std::move(textures)});
+	}
+
+	/*! Releases the wrappers of every command buffer the GPU has finished. */
+	void sweep()
+	{
+		std::vector<InFlight> done;
+		{
+			std::lock_guard<std::mutex> lock(inFlightMutex);
+			for (auto it = inFlight.begin(); it != inFlight.end();) {
+				if (it->buffer->status() >= MTL::CommandBufferStatusCompleted) {
+					done.push_back(std::move(*it));
+					it = inFlight.erase(it);
+				} else {
+					++it;
+				}
+			}
+		}
+		for (InFlight& entry : done) {
+			entry.buffers.clear();
+			entry.textures.clear();
+			entry.buffer->release();
+		}
 	}
 };
 
@@ -291,9 +432,20 @@ std::string MetalContext::deviceName() const
 
 Error MetalContext::pipeline(std::string_view libraryName, std::string_view source, std::string_view function, MetalPipeline& out)
 {
+	return pipeline(libraryName, source, function, {}, out);
+}
+
+Error MetalContext::pipeline(std::string_view libraryName, std::string_view source, std::string_view function, const std::vector<MetalFunctionConstant>& constants, MetalPipeline& out)
+{
 	DeviceCache& cache = *impl_->cache;
 	std::lock_guard<std::mutex> lock(cache.mutex);
-	const std::string key = std::string(libraryName) + "/" + std::string(function);
+	std::string key = std::string(libraryName) + "/" + std::string(function);
+	for (const MetalFunctionConstant& c : constants) {
+		key += "/" + std::to_string(c.index) + ":" + std::to_string(static_cast<unsigned>(c.type)) + "=";
+		for (std::uint8_t b : c.bytes) {
+			key += std::to_string(b) + ".";
+		}
+	}
 	if (auto it = cache.pipelines.find(key); it != cache.pipelines.end()) {
 		out.impl_ = it->second;
 		return Error::none();
@@ -318,6 +470,46 @@ Error MetalContext::pipeline(std::string_view libraryName, std::string_view sour
 	if (fn == nullptr) {
 		return Error::make(ErrorCode::NotFound, "The Metal library has no such function").with("library", std::string(libraryName)).with("function", std::string(function));
 	}
+	NS::Dictionary* compiled = fn->functionConstantsDictionary();
+	if (compiled != nullptr && compiled->count() > 0) {
+		// Metal specializes a function with an unset required constant without an error, so the
+		// types and the required set are checked here against the reflection the kernel carries.
+		MTL::FunctionConstantValues* values = MTL::FunctionConstantValues::alloc()->init();
+		std::map<unsigned, MTL::FunctionConstant*> byIndex;
+		NS::Enumerator<NS::Object>* keys = compiled->keyEnumerator();
+		while (NS::Object* k = keys->nextObject()) {
+			auto* constant = compiled->object<MTL::FunctionConstant>(k);
+			byIndex[static_cast<unsigned>(constant->index())] = constant;
+		}
+		for (const MetalFunctionConstant& c : constants) {
+			auto it = byIndex.find(c.index);
+			if (it == byIndex.end()) {
+				continue;
+			}
+			if (static_cast<std::uint32_t>(it->second->type()) != static_cast<std::uint32_t>(c.type)) {
+				values->release();
+				fn->release();
+				return Error::make(ErrorCode::InvalidParameter, "A function constant's type differs between the reflection and the compiled library").with("index", std::to_string(c.index));
+			}
+			values->setConstantValue(c.bytes.data(), static_cast<MTL::DataType>(c.type), c.index);
+			byIndex.erase(it);
+		}
+		for (const auto& [index, constant] : byIndex) {
+			if (constant->required()) {
+				values->release();
+				fn->release();
+				return Error::make(ErrorCode::InvalidParameter, "A required function constant has no value").with("index", std::to_string(index));
+			}
+		}
+		NS::Error* specializeError = nullptr;
+		MTL::Function* specialized = library->newFunction(name.get(), values, &specializeError);
+		values->release();
+		fn->release();
+		if (specialized == nullptr) {
+			return Error::make(ErrorCode::Render, "The Metal function did not specialize", describe(specializeError)).with("function", std::string(function));
+		}
+		fn = specialized;
+	}
 	NS::Error* error = nullptr;
 	MTL::ComputePipelineState* state = impl_->device->newComputePipelineState(fn, &error);
 	fn->release();
@@ -336,6 +528,7 @@ Error MetalContext::pipeline(std::string_view libraryName, std::string_view sour
 
 MetalBuffer MetalContext::scratch(std::size_t length)
 {
+	impl_->sweep();
 	MTL::Buffer* found = nullptr;
 	{
 		std::lock_guard<std::mutex> lock(impl_->poolMutex);
@@ -366,6 +559,7 @@ MetalBuffer MetalContext::scratch(std::size_t length)
 
 MetalBuffer MetalContext::newBuffer(std::size_t length, const void* initial)
 {
+	impl_->sweep();
 	const std::size_t size = std::max<std::size_t>(length, 16);
 	MTL::Buffer* made = initial != nullptr && length > 0 ? impl_->device->newBuffer(initial, size, MTL::ResourceStorageModeShared) : impl_->device->newBuffer(size, MTL::ResourceStorageModeShared);
 	if (made == nullptr) {
@@ -389,7 +583,9 @@ Error MetalContext::waitIdle()
 	if (!fence.valid()) {
 		return Error::make(ErrorCode::Render, "No Metal command buffer is available");
 	}
-	return fence.commitAndWait();
+	Error e = fence.commitAndWait();
+	impl_->sweep();
+	return e;
 }
 
 std::size_t MetalContext::pooledBytes() const
@@ -404,6 +600,7 @@ std::size_t MetalContext::pooledBytes() const
 
 void MetalContext::drainPool()
 {
+	impl_->sweep();
 	std::vector<MTL::Buffer*> drained;
 	{
 		std::lock_guard<std::mutex> lock(impl_->poolMutex);
@@ -420,11 +617,101 @@ std::size_t MetalContext::pipelineCount() const
 	return impl_->cache->pipelines.size();
 }
 
+namespace {
+
+MTL::TextureDescriptor* textureDescriptor(MetalPixelFormat format, unsigned width, unsigned height, bool shaderWrite, bool shared)
+{
+	MTL::TextureDescriptor* descriptor = MTL::TextureDescriptor::texture2DDescriptor(nativeFormat(format), width, height, false);
+	descriptor->setUsage(shaderWrite ? (MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite) : MTL::TextureUsageShaderRead);
+	descriptor->setStorageMode(shared ? MTL::StorageModeShared : MTL::StorageModePrivate);
+	return descriptor;
+}
+
+}  // namespace
+
+Error MetalContext::textureOverBuffer(void* buffer, std::size_t offset, std::size_t bytesPerRow, unsigned width, unsigned height, MetalPixelFormat format, bool shaderWrite, MetalTexture& out)
+{
+	if (buffer == nullptr) {
+		return Error::make(ErrorCode::BadHandle, "The texture's buffer is null");
+	}
+	if (format == MetalPixelFormat::Invalid || width == 0 || height == 0) {
+		return Error::make(ErrorCode::Format, "The texture has no usable format or size");
+	}
+	const std::size_t alignment = linearTextureAlignment(format);
+	if (bytesPerRow < width * metalPixelBytes(format) || (alignment != 0 && bytesPerRow % alignment != 0) || (alignment != 0 && offset % alignment != 0)) {
+		return Error::make(ErrorCode::Format, "The buffer's rows are not aligned for a texture").with("bytesPerRow", std::to_string(bytesPerRow)).with("alignment", std::to_string(alignment));
+	}
+	auto* native = static_cast<MTL::Buffer*>(buffer);
+	if (offset + bytesPerRow * (height - 1) + width * metalPixelBytes(format) > native->length()) {
+		return Error::make(ErrorCode::BadIndex, "The texture exceeds the buffer's length");
+	}
+	PoolScope pool;
+	// The buffer's own storage mode decides the texture's; the descriptor must agree with it.
+	MTL::TextureDescriptor* descriptor = textureDescriptor(format, width, height, shaderWrite, native->storageMode() == MTL::StorageModeShared);
+	descriptor->setStorageMode(native->storageMode());
+	MTL::Texture* texture = native->newTexture(descriptor, offset, bytesPerRow);
+	if (texture == nullptr) {
+		return Error::make(ErrorCode::Render, "The buffer-backed texture did not allocate");
+	}
+	out.impl_ = std::make_shared<MetalTexture::Impl>();
+	out.impl_->texture = texture;
+	out.impl_->width = width;
+	out.impl_->height = height;
+	out.impl_->format = format;
+	return Error::none();
+}
+
+Error MetalContext::newTexture(unsigned width, unsigned height, MetalPixelFormat format, bool shaderWrite, MetalTexture& out)
+{
+	if (format == MetalPixelFormat::Invalid || width == 0 || height == 0) {
+		return Error::make(ErrorCode::Format, "The texture has no usable format or size");
+	}
+	PoolScope pool;
+	MTL::Texture* texture = impl_->device->newTexture(textureDescriptor(format, width, height, shaderWrite, false));
+	if (texture == nullptr) {
+		return Error::make(ErrorCode::Memory, "The texture did not allocate");
+	}
+	out.impl_ = std::make_shared<MetalTexture::Impl>();
+	out.impl_->texture = texture;
+	out.impl_->width = width;
+	out.impl_->height = height;
+	out.impl_->format = format;
+	return Error::none();
+}
+
+std::size_t MetalContext::linearTextureAlignment(MetalPixelFormat format) const
+{
+	if (format == MetalPixelFormat::Invalid) {
+		return 0;
+	}
+	return static_cast<std::size_t>(impl_->device->minimumLinearTextureAlignmentForPixelFormat(nativeFormat(format)));
+}
+
+void* MetalContext::bilinearSampler()
+{
+	DeviceCache& cache = *impl_->cache;
+	std::lock_guard<std::mutex> lock(cache.mutex);
+	if (cache.bilinear == nullptr) {
+		PoolScope pool;
+		MTL::SamplerDescriptor* descriptor = MTL::SamplerDescriptor::alloc()->init();
+		descriptor->setMinFilter(MTL::SamplerMinMagFilterLinear);
+		descriptor->setMagFilter(MTL::SamplerMinMagFilterLinear);
+		descriptor->setMipFilter(MTL::SamplerMipFilterNotMipmapped);
+		descriptor->setSAddressMode(MTL::SamplerAddressModeClampToEdge);
+		descriptor->setTAddressMode(MTL::SamplerAddressModeClampToEdge);
+		descriptor->setNormalizedCoordinates(true);
+		cache.bilinear = impl_->device->newSamplerState(descriptor);
+		descriptor->release();
+	}
+	return cache.bilinear;
+}
+
 // ---- command buffers ----------------------------------------------------------------------------
 
 struct MetalCommandBuffer::Impl {
 	MTL::CommandBuffer* buffer{nullptr};
 	std::vector<MetalBuffer> retained;
+	std::vector<MetalTexture> retainedTextures;
 	bool committed{false};
 	~Impl()
 	{
@@ -441,6 +728,7 @@ MetalCommandBuffer& MetalCommandBuffer::operator=(MetalCommandBuffer&&) noexcept
 
 MetalCommandBuffer MetalContext::commandBuffer()
 {
+	impl_->sweep();
 	MetalCommandBuffer out;
 	PoolScope pool;
 	MTL::CommandBuffer* buffer = impl_->queue->commandBuffer();
@@ -449,6 +737,7 @@ MetalCommandBuffer MetalContext::commandBuffer()
 	}
 	out.impl_ = std::make_unique<MetalCommandBuffer::Impl>();
 	out.impl_->buffer = buffer->retain();
+	out.context_ = shared_from_this();
 	return out;
 }
 
@@ -492,15 +781,97 @@ Error MetalCommandBuffer::dispatch(const MetalDispatch& dispatch)
 	for (const MetalDispatch::BytesArg& arg : dispatch.bytes) {
 		encoder->setBytes(arg.data, arg.length, arg.index);
 	}
+	for (const MetalDispatch::TextureArg& arg : dispatch.textures) {
+		if (arg.handle == nullptr) {
+			encoder->endEncoding();
+			return Error::make(ErrorCode::BadHandle, "A dispatch texture argument is null").with("index", std::to_string(arg.index));
+		}
+		encoder->setTexture(static_cast<MTL::Texture*>(arg.handle), arg.index);
+	}
+	if (!dispatch.bilinearSamplers.empty()) {
+		auto* sampler = static_cast<MTL::SamplerState*>(context_->bilinearSampler());
+		for (unsigned index : dispatch.bilinearSamplers) {
+			encoder->setSamplerState(sampler, index);
+		}
+	}
 	// Threadgroup counts are rounded up and the kernel bounds-checks, which every Metal device
 	// supports; non-uniform threadgroups are not required.
-	const unsigned width = std::max(1u, dispatch.pipeline.threadExecutionWidth());
-	const unsigned height = std::max(1u, dispatch.pipeline.maxThreadsPerThreadgroup() / width);
-	const MTL::Size group(width, height, 1);
-	const MTL::Size groups((dispatch.width + width - 1) / width, (dispatch.height + height - 1) / height, dispatch.depth);
+	unsigned width = dispatch.threadsPerThreadgroup[0];
+	unsigned height = dispatch.threadsPerThreadgroup[1];
+	unsigned depth = dispatch.threadsPerThreadgroup[2];
+	if (width == 0 || height == 0 || depth == 0) {
+		width = std::max(1u, dispatch.pipeline.threadExecutionWidth());
+		height = std::max(1u, dispatch.pipeline.maxThreadsPerThreadgroup() / width);
+		depth = 1;
+	}
+	if (width * height * depth > std::max(1u, dispatch.pipeline.maxThreadsPerThreadgroup())) {
+		encoder->endEncoding();
+		return Error::make(ErrorCode::Render, "The threadgroup exceeds the pipeline's maximum").with("threads", std::to_string(width * height * depth));
+	}
+	const MTL::Size group(width, height, depth);
+	const MTL::Size groups((dispatch.width + width - 1) / width, (dispatch.height + height - 1) / height, (dispatch.depth + depth - 1) / depth);
 	encoder->dispatchThreadgroups(groups, group);
 	encoder->endEncoding();
 	return Error::none();
+}
+
+Error MetalCommandBuffer::copyBufferToTexture(void* sourceBuffer, std::size_t sourceOffset, std::size_t bytesPerRow, const MetalTexture& destination)
+{
+	if (!valid()) {
+		return Error::make(ErrorCode::BadHandle, "The Metal command buffer is not valid");
+	}
+	if (impl_->committed) {
+		return Error::make(ErrorCode::WrongPhase, "The Metal command buffer was already committed");
+	}
+	if (sourceBuffer == nullptr || !destination.valid()) {
+		return Error::make(ErrorCode::BadHandle, "A copy operand is null");
+	}
+	auto* source = static_cast<MTL::Buffer*>(sourceBuffer);
+	const std::size_t pixelBytes = metalPixelBytes(destination.format());
+	if (bytesPerRow < destination.width() * pixelBytes || sourceOffset + bytesPerRow * (destination.height() - 1) + destination.width() * pixelBytes > source->length()) {
+		return Error::make(ErrorCode::BadIndex, "The copy exceeds the buffer's length");
+	}
+	PoolScope pool;
+	MTL::BlitCommandEncoder* encoder = impl_->buffer->blitCommandEncoder();
+	if (encoder == nullptr) {
+		return Error::make(ErrorCode::Render, "No blit encoder is available");
+	}
+	encoder->copyFromBuffer(source, sourceOffset, bytesPerRow, 0, MTL::Size(destination.width(), destination.height(), 1), static_cast<MTL::Texture*>(destination.handle()), 0, 0, MTL::Origin(0, 0, 0));
+	encoder->endEncoding();
+	return Error::none();
+}
+
+Error MetalCommandBuffer::copyTextureToBuffer(const MetalTexture& source, void* destinationBuffer, std::size_t destinationOffset, std::size_t bytesPerRow)
+{
+	if (!valid()) {
+		return Error::make(ErrorCode::BadHandle, "The Metal command buffer is not valid");
+	}
+	if (impl_->committed) {
+		return Error::make(ErrorCode::WrongPhase, "The Metal command buffer was already committed");
+	}
+	if (destinationBuffer == nullptr || !source.valid()) {
+		return Error::make(ErrorCode::BadHandle, "A copy operand is null");
+	}
+	auto* destination = static_cast<MTL::Buffer*>(destinationBuffer);
+	const std::size_t pixelBytes = metalPixelBytes(source.format());
+	if (bytesPerRow < source.width() * pixelBytes || destinationOffset + bytesPerRow * (source.height() - 1) + source.width() * pixelBytes > destination->length()) {
+		return Error::make(ErrorCode::BadIndex, "The copy exceeds the buffer's length");
+	}
+	PoolScope pool;
+	MTL::BlitCommandEncoder* encoder = impl_->buffer->blitCommandEncoder();
+	if (encoder == nullptr) {
+		return Error::make(ErrorCode::Render, "No blit encoder is available");
+	}
+	encoder->copyFromTexture(static_cast<MTL::Texture*>(source.handle()), 0, 0, MTL::Origin(0, 0, 0), MTL::Size(source.width(), source.height(), 1), destination, destinationOffset, bytesPerRow, 0);
+	encoder->endEncoding();
+	return Error::none();
+}
+
+void MetalCommandBuffer::retain(MetalTexture texture)
+{
+	if (impl_ && texture.valid()) {
+		impl_->retainedTextures.push_back(std::move(texture));
+	}
 }
 
 Error MetalCommandBuffer::copy(void* sourceBuffer, std::size_t sourceOffset, void* destinationBuffer, std::size_t destinationOffset, std::size_t length)
@@ -575,11 +946,11 @@ Error MetalCommandBuffer::commit()
 	if (impl_->committed) {
 		return Error::make(ErrorCode::WrongPhase, "The Metal command buffer was already committed");
 	}
-	if (!impl_->retained.empty()) {
-		// The retained buffers live in the handler until the GPU has finished with them.
-		std::vector<MetalBuffer> retained = std::move(impl_->retained);
+	if (!impl_->retained.empty() || !impl_->retainedTextures.empty()) {
+		// The context keeps the retained wrappers until a later sweep sees the GPU done with them.
+		context_->impl_->hold(impl_->buffer, std::move(impl_->retained), std::move(impl_->retainedTextures));
 		impl_->retained.clear();
-		impl_->buffer->addCompletedHandler([retained](MTL::CommandBuffer*) mutable { retained.clear(); });
+		impl_->retainedTextures.clear();
 	}
 	impl_->buffer->commit();
 	impl_->committed = true;

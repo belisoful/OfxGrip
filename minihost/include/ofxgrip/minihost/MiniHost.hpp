@@ -61,12 +61,14 @@ struct HostOptions {
 	std::vector<std::string> depths{"OfxBitDepthByte", "OfxBitDepthShort", "OfxBitDepthHalf", "OfxBitDepthFloat"};
 	std::string nativeOrigin{"kOfxImageEffectHostPropNativeOriginBottomLeft"};  /*!< Empty withholds the property. */
 	bool metalRenderSupported{false};          /*!< The host description's Metal flag. */
+	bool openCLRenderSupported{false};         /*!< The host description's OpenCL flag. */
 	std::set<std::string> withheldSuites;      /*!< Suite names (with `:version` for V2) the host does not vend. */
 	std::set<std::string> withheldHostProps;   /*!< Host description properties the host lacks. */
 	bool clipsAlwaysConnected{false};          /*!< Q-RESOLVE-002 */
 	bool threadSuiteDummy{false};              /*!< Q-RESOLVE-003: `multiThread` runs the function once. */
 	bool messageV2Broken{false};               /*!< Q-RESOLVE-007: V2 is vended with null persistent-message pointers. */
 	bool imageScaleAlwaysOne{false};           /*!< Q-RESOLVE-010 */
+	bool drawSuite{true};                      /*!< Vends the OFX 1.5 draw suite; the overlay interact is then V2. */
 	bool nonConformantInstanceType{false};     /*!< Q-RESOLVE-014 */
 	bool paramCopyNoOp{false};                 /*!< Q-RESOLVE-006 */
 	bool renderDespiteIdentity{false};         /*!< Q-RESOLVE-027 */
@@ -107,8 +109,9 @@ struct RenderRequest {
 	bool draft{false};
 	bool interactive{false};
 	/*! The GPU API to hand frames in. `Metal` uploads the inputs to `MTLBuffer`s, passes the
-	    host's own command queue, and reads the output buffer back; it falls back to CPU frames
-	    when the host options or the plug-in descriptor lack Metal, or no device exists. */
+	    host's own command queue, and reads the output buffer back; `OpenCL` does the same with
+	    `cl_mem` buffers and a `cl_command_queue`. Either falls back to CPU frames when the host
+	    options or the plug-in descriptor lack the API, or no device exists. */
 	GpuApi gpu{GpuApi::None};
 };
 
@@ -139,6 +142,18 @@ struct RenderResult {
 class MiniHost;
 class EffectObject;
 class Clip;
+class InteractObject;
+
+/*! One call an overlay made through the draw suite, recorded per instance. */
+struct DrawCall {
+	std::string op;                /*!< `colour`, `width`, `stipple`, `lines`, `strip`, `loop`, `rect`, `polygon`, `ellipse`, `text`. */
+	std::vector<Point2D> points;
+	float colour[4]{1, 1, 1, 1};
+	float width{0};
+	int stipple{0};
+	std::string text;
+	int align{0};
+};
 
 /*! One effect instance. */
 class Instance {
@@ -185,6 +200,32 @@ public:
 	void setCurrentTime(Time t) noexcept { currentTime_ = t; }
 	Time currentTime() const noexcept { return currentTime_; }
 
+	/*! The overlay interact, when the plug-in declared one (phase 3). The draw calls go to a
+	    recorder; the pen and key actions take canonical coordinates and OpenFX key symbols. */
+	bool hasOverlay() const noexcept { return interact_ != nullptr; }
+	/*! The interact version the plug-in declared: 2 with the draw suite, 1 with OpenGL, 0 for none. */
+	int overlayVersion() const noexcept { return overlayVersion_; }
+	OfxStatus overlayDraw(Time time = 0, Point2D pixelScale = {1, 1});
+	OfxStatus overlayPenDown(Point2D canonical, Time time = 0, double pressure = 1.0);
+	OfxStatus overlayPenMotion(Point2D canonical, Time time = 0, double pressure = 1.0);
+	OfxStatus overlayPenUp(Point2D canonical, Time time = 0, double pressure = 0.0);
+	OfxStatus overlayKeyDown(int keySymbol, const std::string& keyString = {}, Time time = 0);
+	OfxStatus overlayKeyUp(int keySymbol, const std::string& keyString = {}, Time time = 0);
+	OfxStatus overlayGainFocus(Time time = 0);
+	OfxStatus overlayLoseFocus(Time time = 0);
+	/*! The parameter-edit nesting the plug-in opened through `paramEditBegin`, and the names
+	    it gave, for tests. */
+	int editDepth() const;
+	std::vector<std::string> editNames() const;
+	/*! The draw calls of the last `overlayDraw`. */
+	const std::vector<DrawCall>& drawCalls() const noexcept { return drawCalls_; }
+	/*! How often the plug-in asked for a redraw through the interact suite. */
+	int overlayRedrawRequests() const noexcept { return redrawRequests_; }
+	/*! The canonical units per screen pixel the next interact action reports. */
+	void setOverlayPixelScale(Point2D scale) noexcept { pixelScale_ = scale; }
+	/*! The Natron device pixel ratio property, when non-zero (Q-NATRON-003). */
+	void setOverlayScreenPixelRatio(double ratio) noexcept { screenPixelRatio_ = ratio; }
+
 	/*! Messages the plug-in posted through the message suite. */
 	std::vector<std::string> messages() const;
 	std::string persistentMessage() const;
@@ -196,9 +237,17 @@ private:
 	friend struct HostSuites;
 	Instance(MiniHost& host, std::unique_ptr<EffectObject> object, std::string context, Project project);
 	OfxStatus dispatch(const char* action, PropSet* inArgs, PropSet* outArgs);
+	OfxStatus interactDispatch(const char* action, PropSet* inArgs);
+	void fillInteractArgs(PropSet& in, Time time) const;
 
 	MiniHost& host_;
 	std::unique_ptr<EffectObject> object_;
+	std::unique_ptr<InteractObject> interact_;
+	int overlayVersion_{0};
+	std::vector<DrawCall> drawCalls_;
+	int redrawRequests_{0};
+	Point2D pixelScale_{1, 1};
+	double screenPixelRatio_{0};
 	std::string context_;
 	Project project_;
 	Time currentTime_{0};
@@ -256,6 +305,9 @@ private:
 	PropSet hostProps_;
 	OfxPlugin* plugin_{nullptr};
 	std::unique_ptr<EffectObject> descriptor_;
+	std::unique_ptr<InteractObject> interactDescriptor_;
+	OfxPluginEntryPoint* overlayEntry_{nullptr};
+	int overlayVersion_{0};
 	std::map<std::string, std::unique_ptr<EffectObject>> contextDescriptors_;
 	std::vector<std::string> describedContexts_;
 	mutable std::mutex logMutex_;

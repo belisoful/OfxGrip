@@ -47,10 +47,10 @@ The FxGrip profile (`Research/Analysis/FxGrip.md` §13) divides FxGrip into what
 | Out-of-band access (`FxGripOOBParameterAccess`) | `EditScope` over `paramEditBegin`/`paramEditEnd`; writes allowed only in the actions OFX permits, checked per phase. | 1 |
 | Analysis pass (`FxAnalyzer`, `FxGripFrameData`) | `AnalysisJob` driven from a push button in `instanceChanged`, fetching clip images with the progress suite; `FrameData` with disk spill in the per-OS cache directory. | 2 |
 | Custom inspector controls (Section, Banner, Status, …) | Resolve has no inspector views (Q-RESOLVE-019). Each control lowers to standard parameters: Section → group, Banner/Status → label string, Switch → boolean, Presets → choice, Divider → label. The control vocabulary stays so one manifest serves every host. | 2 |
-| On-screen controls (`FxGripOSCPart`) | Overlay interact with the OFX draw suite (1.5) and a GL 2.1 fallback; part model shared by geometry, hit test, and drag routing. | 3 |
+| On-screen controls (`FxGripOSCPart`) | `OverlayControl` and `OverlayPart` in the core (point, line, rect, circle, angle dial, polyline, box, HUD; composites; Shift and Alt modifiers); the adapter's `OverlayInteract` over the OFX draw suite (1.5) with an OpenGL 2.1 fallback that stands down without a current context. | 3 |
 | `FxGripMTLDeviceCache`, `FxGripImageBuffer` | `GpuImage` descriptor (API, device, queue, handle, layout) and a per-queue resource pool; CPU `ImageView` with pixel-format dispatch. | 0 (CPU), 1 (Metal) |
-| Licensing (`FxGripLicensing`, provider protocol) | Provider interface and entitlement in the core; license state in the render snapshot; watermark on CPU and Metal. Providers per store are a separate decision. | 3 |
-| Shader metadata (`FxGripShaderMetadata`, JSON5 in shader source) | Kernel metadata in Slang or MSL source emitting `ParameterSpec`s. | 3 |
+| Licensing (`FxGripLicensing`, provider protocol) | `LicensingProvider` interface, entitlement, and `LicensingExtension` in the core with the built-in `static`, `trial`, and `file` providers; license state in the render snapshot; the watermark after render on CPU, Metal, and OpenCL frames. Providers per store are a separate decision (D-010). | 3 |
+| Shader metadata (`FxGripShaderMetadata`, JSON5 in shader source) | `KernelMetadata` scans the `FxGripShader` JSON5 block in the `.slang` source into `ParameterSpec`s; `KernelLayout` binds the globals from the slangc reflection JSON (D-009). | 3 |
 | Inference seam (`FxGripInferenceBackend`) | InferKit through its planned C API, or a Wraz server over HTTP. Never on the render thread. | 4 |
 | I18N, About and Debug menus, instance tracker, regression | Extensions over the event bus. Menus become choice parameters. | 2 |
 | Registrars (`PROPlugInRegistering`) | Bounded plug-in table with one generated `mainEntry` trampoline per plug-in; `OfxGetNumberOfPlugins`/`OfxGetPlugin` from one macro. | 0 |
@@ -86,14 +86,17 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: the C contract `include/ofxgrip/c/ofxgrip_c.h` (manifest building, a callback table per effect, render context, snapshot, services, bundle exports) and the Rust workspace under `rust/`: `ofxgrip-sys` (raw bindings, links this build or builds the libraries with the `cmake` crate), `ofxgrip` (safe API, `Effect` trait, `bundle!` macro), and `examples/gain-rs`, packaged as `OfxGripGainRs.ofx.bundle` by `OFXGRIP_BUILD_RUST=ON` and tested through the mini host. The crates live in this repository as a workspace; moving them to their own repository is a later decision.
 - Open: Resolve behavior probes for phase 1 and 2 features (presets control, analysis pass through `clipGetImage` in `instanceChanged`, label-mode strings) need an instance on each page.
 
-### Phase 3: overlays, GPU engine, licensing
+### Phase 3: overlays, GPU engine, licensing (built 2026-10-15)
 
-- Overlay interact over the draw suite with GL fallback; OSC part model.
-- Slang kernel pipeline (slangc at build time) with the resolution rules; CUDA, OpenCL, and Vulkan backends; conformance suite with golden images per backend.
-- Licensing provider interface, entitlement, watermark.
+- Done: the overlay model in the core (`Overlay.hpp`: parts, composites, modifiers, the `OverlayParameters` seam, a recording draw kit) and the adapter's `OverlayInteract` over the draw suite, with the OpenGL fallback and the interact trampolines; the mini host implements the interact and draw suites and records draw calls.
+- Done: the D-009 kernel pipeline. `kernels/GripKernel.slang` (with the rows-ascend amendment), `KernelLayout` over the reflection JSON, `KernelMetadata` over the JSON5 block, `KernelTile`, `KernelValues` (uniforms, specialization constants), `KernelCatalog` with the resolution rules (native for backend, host, and OS over native for backend over universal over CPU), `KernelEngine` with the CPU backend over the Slang C++ prelude and the Metal backend over buffer-backed textures, `KernelEffect` and `KernelEffectFactory`, `ofxgrip_add_kernels` embedding checked-in slangc outputs, and the `Spot` sample. The conformance suite compares Metal against the CPU backend per depth and per kernel mode (`tests/gpu/KernelEngineTests.cpp`, `tests/integration/SpotBundleTests.cpp`).
+- Done: the OpenCL backend (`OpenCLBackend`), OpenCL frames in the mini host, and the Gain sample's OpenCL kernels.
+- Done: licensing (`Licensing.hpp`, `LicensingProviders.hpp`, `Watermark.hpp`, `Digest.hpp`): the provider interface and registry, the built-in `static`, `trial`, and `file` providers, the manifest's `licensing` declaration, the hidden status toggle and the licensing menu, the debug menu's override rows, the license state and entitlement in the snapshot, the C contract's `ofxgrip_snapshot_license_state` and the Rust `Snapshot::license_state`, and the watermark after render on CPU, Metal, and OpenCL frames.
+- Deferred to phase 4: the CUDA and Vulkan kernel backends and their golden images. The development Mac now has a Vulkan runtime (Homebrew `vulkan-headers`, `vulkan-loader`, `molten-vk`, `vulkan-tools`, `glslang`, installed 2026-10-15; the loader finds MoltenVK through `/opt/homebrew/etc/vulkan/icd.d` with no environment variable) and the CUDA 13.4.92 headers (`APIs/cuda-13.4.92/include`, from NVIDIA's `cuda_cudart` and `cuda_crt` redistributables; headers only, since no CUDA runtime or `nvcc` exists for Apple silicon). The Vulkan backend can therefore be built and golden-imaged here; the CUDA backend can be compiled against the headers with the driver API loaded at run time, but its golden images still need a machine with an NVIDIA GPU. The catalog already knows the targets and `scripts/ofxgrip-slang.sh` emits `.cu` and `.spv` on request.
 
 ### Phase 4: Windows and Linux
 
+- The CUDA and Vulkan kernel backends over the engine, with their golden images, on a machine that has the runtimes.
 - CMake toolchains, MSVC and GCC builds, the `Win64`, `Win-arm64ec`, `Linux-x86-64`, and `Linux-aarch64` bundle folders, Authenticode and old-glibc builds, CI runners. Windows on Arm means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL; no OpenFX host ships for Arm Linux yet. Live hosts are an open question (no Windows or Linux machine is known).
 - Inference through InferKit's C API or a Wraz server.
 
@@ -107,23 +110,29 @@ OfxGrip/
   cmake/           OfxGripPlugin.cmake (bundle layout, Info.plist), toolchain helpers
   external/openfx/ vendored OpenFX 1.5.1 C headers (BSD-3) and LICENSE.md
   external/metal-cpp/ Apple's metal-cpp (Apache-2.0)
+  external/slang-prelude/ the Slang C++ prelude (Apache-2.0 with LLVM exception)
+  kernels/         GripKernel.slang, the D-009 module
   include/ofxgrip/ public headers
     core/          host-neutral: Types, Error, Value, Codec, Plist, Flags, Manifest, ManifestJson,
                    Rules, Events, Extension, HostServices, HostProfile, Quirks, RenderSnapshot,
                    Image, Parameters, MetaManager, Preset, Presets, FrameData, I18n, About, Debug,
-                   InstanceTracker, Regression, and the framework extensions (Meta, Visibility,
-                   Versioning, Analysis)  (GripTruck candidates, no OFX headers)
-    ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect, Analysis,
-                   Plugin, OfxHostServices, ResolveExtensions
-    gpu/           MetalBackend (macOS); CUDA, OpenCL, and Vulkan backends in phase 3
+                   InstanceTracker, Regression, Kernel* (layout, metadata, tile, values, catalog),
+                   Overlay, Licensing, LicensingProviders, Watermark, Digest, and the framework
+                   extensions (Meta, Visibility, Versioning, Analysis, Licensing)
+                   (GripTruck candidates, no OFX headers)
+    ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,
+                   KernelEffect, Interact, RenderWatermark, Analysis, Plugin, OfxHostServices,
+                   ResolveExtensions
+    gpu/           KernelEngine, CpuKernelBackend, KernelCpu; MetalBackend, MetalKernelBackend,
+                   MetalWatermark (macOS); OpenCLBackend, OpenCLWatermark; CUDA and Vulkan in phase 4
     c/             ofxgrip_c.h, the C contract
   src/             implementation, same split (src/c holds the contract)
   rust/            the Rust workspace: ofxgrip-sys, ofxgrip, examples/gain-rs
   minihost/        the headless OFX host library and `ofxgrip-minihost` CLI
-  plugins/         HostDump (probe), Gain (sample)
-  tests/           GoogleTest: unit tests per header, GPU backend tests, mini-host integration
-                   tests, artifact tests
-  scripts/         install-bundle.sh, validate-bundle.py, dump-registry.py
+  plugins/         HostDump (probe), Gain (sample), Spot (kernel sample)
+  tests/           GoogleTest: unit tests per header, GPU backend and kernel tests, mini-host
+                   integration tests, artifact tests
+  scripts/         install-bundle.sh, validate-bundle.py, coverage.sh, ofxgrip-slang.sh
   .github/         CI workflows
   local/           reference clones (ignored)
 ```
@@ -159,8 +168,9 @@ CI runs the same steps on `macos-26`, and the build-and-test subset on `ubuntu-2
 | --- | --- |
 | The Rust crates live under `rust/` in this repository; a separate repository is a later choice | Decided for now |
 | metal-cpp: approved and vendored under `external/metal-cpp`; the Metal backend is built | Done |
-| Slang compiler (`slangc`) as a build dependency | Phase 3 |
+| Slang compiler (`slangc`): optional at build time (`OFXGRIP_SLANGC`); generated sources are checked in | Done |
 | Windows and Linux machines with Resolve for live tests | Phase 4 |
-| Licensing provider for Windows and Linux | Phase 3 |
-| Natron as a second free OFX host | Phase 3 |
+| Licensing providers per store (FxFactory, key server); the built-ins are store-neutral | Open, D-010 |
+| CUDA and Vulkan kernel backends (need a machine with the runtimes) | Phase 4 |
+| Natron as a second free OFX host | Phase 4 |
 | Computer use (or the developer driving Resolve) for the per-page probes | Phase 1, open |

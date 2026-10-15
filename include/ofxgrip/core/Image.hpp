@@ -101,6 +101,11 @@ struct GpuImage {
 	bool needsIntermediateCopy{false};  /*!< Set from the profile (Q-RESOLVE-031). */
 };
 
+/*! Converts an IEEE 754 half to a float. */
+float halfToFloat(std::uint16_t h) noexcept;
+/*! Converts a float to an IEEE 754 half, rounding to nearest even. */
+std::uint16_t floatToHalf(float f) noexcept;
+
 /*! Reads one component as a float in [0, 1] for integer depths. */
 float readComponent(const std::uint8_t* pixel, BitDepth depth, std::size_t component) noexcept;
 /*! Writes one component from a float, clamping and rounding for integer depths. */

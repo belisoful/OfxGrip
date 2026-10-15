@@ -21,6 +21,7 @@
 #include <ofxgrip/core/Flags.hpp>
 #include <ofxgrip/core/Types.hpp>
 #include <ofxgrip/core/Value.hpp>
+#include <ofxgrip/core/Watermark.hpp>
 
 #include <map>
 #include <optional>
@@ -278,6 +279,30 @@ struct AboutMenu {
 	bool operator==(const AboutMenu&) const = default;
 };
 
+/*! The settings a licensing provider is created with: the manifest's `licensing.settings` map.
+    Introduced in OfxGrip 0.4.0. */
+using LicensingSettings = std::map<std::string, Value>;
+
+/*! The manifest's licensing declaration. Introduced in OfxGrip 0.4.0. An empty `provider`
+    declares no licensing and loads no licensing extension. */
+struct LicensingSpec {
+	std::string provider;                 /*!< The registry name of the provider. */
+	std::string productId;                /*!< Empty means the manifest UUID. */
+	std::string productVersion;           /*!< Empty means the manifest version. */
+	std::string licensedVersion;          /*!< The major a license must cover; empty shares one status, `*` means the manifest major. */
+	std::string releaseDate;              /*!< ISO 8601 date of this build; empty skips the update window. */
+	bool watermarkUnlicensed{true};
+	bool watermarkTrial{false};
+	std::optional<WatermarkConfiguration> unlicensedWatermark;
+	std::optional<WatermarkConfiguration> trialWatermark;
+	bool showBuyButton{true};
+	bool showProductButton{true};
+	bool autoChecking{true};
+	LicensingSettings settings;           /*!< Passed to the provider's factory. */
+	bool operator==(const LicensingSpec&) const = default;
+	bool empty() const noexcept { return provider.empty(); }
+};
+
 /*! An effect manifest. */
 struct EffectManifest {
 	unsigned schemaVersion{1};
@@ -296,6 +321,7 @@ struct EffectManifest {
 	    `trackInstances`, `regression`, and `analysis` (all default false), to decide which
 	    framework extensions to load on an instance. */
 	std::map<std::string, Value> properties;
+	LicensingSpec licensing;               /*!< The licensing declaration; empty means none. */
 	/*! A property as a boolean, or `fallback` when absent. */
 	bool property(std::string_view name, bool fallback) const;
 

@@ -22,8 +22,10 @@
 #include <ofxgrip/core/Debug.hpp>
 #include <ofxgrip/core/I18n.hpp>
 #include <ofxgrip/core/InstanceTracker.hpp>
+#include <ofxgrip/core/Licensing.hpp>
 #include <ofxgrip/core/Regression.hpp>
 #include <ofxgrip/core/MetaExtension.hpp>
+#include <ofxgrip/core/Overlay.hpp>
 #include <ofxgrip/core/Parameters.hpp>
 #include <ofxgrip/core/Presets.hpp>
 #include <ofxgrip/core/RenderSnapshot.hpp>
@@ -36,6 +38,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -128,6 +131,8 @@ public:
 	I18nExtension* i18nExtension() { return i18nExtension_; }
 	InstanceTrackerExtension* instanceTracker() { return instanceTracker_; }
 	RegressionExtension* regressionExtension() { return regressionExtension_; }
+	/*! The licensing extension, or null when the manifest declares no provider (phase 3). */
+	LicensingExtension* licensingExtension() { return licensingExtension_; }
 	/*! The preset service (phase 2). Valid once attached. */
 	PresetManager& presets();
 	/*! The analysis store, or null when the effect declares no analyzer and no `analysis`
@@ -168,6 +173,10 @@ public:
 	virtual Error onEndSequenceRender(const SequenceRenderArgs& args);
 	/*! The render. Required. */
 	virtual Error render(RenderContext& context) = 0;
+	/*! The on-screen control of an instance, when the manifest property `overlay` is set. The
+	    adapter creates it with the host's overlay interact and destroys it with the interact
+	    (phase 3). The default returns none, which draws nothing. */
+	virtual std::unique_ptr<OverlayControl> createOverlay(OverlayParameters& parameters);
 
 	/*! Adapter entry points. */
 	void attach(std::unique_ptr<OfxHostServices> services, const CreateInstanceArgs& args);
@@ -195,6 +204,7 @@ private:
 	I18nExtension* i18nExtension_{nullptr};
 	InstanceTrackerExtension* instanceTracker_{nullptr};
 	RegressionExtension* regressionExtension_{nullptr};
+	LicensingExtension* licensingExtension_{nullptr};
 	EffectManifest emptyManifest_;
 };
 
@@ -209,6 +219,16 @@ public:
 	/*! Whether the debug menu may exist. A release build overrides this to return false so a
 	    manifest edit cannot re-enable it. */
 	virtual bool allowsDebugFeatures() const { return true; }
+	/*! The licensing provider the plug-in's instances share, created once from the manifest's
+	    declaration through the registry. A store adapter overrides this to hand out its own. */
+	virtual std::shared_ptr<LicensingProvider> licensingProvider();
+
+private:
+	std::shared_ptr<LicensingProvider> licensingProvider_;
+	bool licensingProviderCreated_{false};
+	std::mutex licensingMutex_;
+
+public:
 	virtual void onLoad(const HostProfile& profile, LogService& log)
 	{
 		(void)profile;

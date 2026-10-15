@@ -1,13 +1,13 @@
 # OfxGrip Architecture
 
-Date: 2026-10-14. Phase 2.
+Date: 2026-10-15. Phase 3.
 
 ## Layers
 
 ```
  Plug-in author (C++, or Rust through the C contract)
    manifest (EffectManifest, C++, JSON, or the C/Rust builders) · Effect subclass or callback
-   table · kernels (CPU and MSL now; Slang later)
+   table · Slang kernels (GripKernel module; slangc outputs checked in) or hand-written MSL and OpenCL
  ────────────────────────────────────────────────────────────────────────────────────────────────
  ofxgrip_c (include/ofxgrip/c) · rust/ofxgrip-sys · rust/ofxgrip
    the C contract over the adapter: manifest building, one callback table per effect, the render
@@ -19,26 +19,40 @@ Date: 2026-10-14. Phase 2.
    PluginSlot action dispatch with one catch boundary, host profile at load, lifecycle events
    Descriptor manifest → OFX descriptor, clips, parameters (registry handling rules applied)
    Effect     the author base: hooks, parameter objects, framework extensions, snapshot
-              building, RenderContext, EditScope, presets, analysis
+              building, RenderContext, EditScope, presets, analysis, createOverlay
+   KernelEffect  an effect whose render dispatches a resolved kernel through the engine
+   Interact   OverlayInteract over the draw suite or OpenGL; the interact trampolines
+   RenderWatermark  the licensing watermark after render, on CPU, Metal, and OpenCL frames
    Analysis   the analysis pass over clipGetImage inside a parameter action
    OfxHostServices  HostServices over the suites: parameters, persistence, feedback, threads,
                     time, paths, log
    Actions · PropertySet · Suites · ResolveExtensions
  ──────────────────────────────── HostServices (abstract) ──────────────────────────────────────
- ofxgrip_gpu_metal (macOS, include/ofxgrip/gpu)
+ ofxgrip_kernels · ofxgrip_gpu_metal (macOS) · ofxgrip_gpu_opencl (include/ofxgrip/gpu)
+   KernelEngine  the backends by API; a dispatch carries the layout, the plan, the packed
+                 uniforms and constants, the window, and the images
+   CpuKernelBackend  the Slang C++ prelude: ITexture views over CPU frames, bands on the
+                 threading service
    MetalBackend  a context per host command queue: pipeline cache, scratch pool, command
-                 buffers over MTLBuffer frames (metal-cpp; no Objective-C class)
+                 buffers over MTLBuffer frames and buffer-backed textures (metal-cpp)
+   MetalKernelBackend  the engine's Metal path: function constants, textures, samplers
+   OpenCLBackend  a context per cl_command_queue: program cache, buffers, blocking fills
+   MetalWatermark · OpenCLWatermark  the blend kernels behind RenderWatermark
  ────────────────────────────────────────────────────────────────────────────────────────────────
  ofxgrip_core (host-neutral, include/ofxgrip/core; no OpenFX include)
    Types · Error · Value · Codec · Plist · Flags · Manifest (+ JSON, target presets, presets
    table, About menu) · Rules · Events (bus) · Extension (system) · Parameters · MetaManager
    Preset (.fxpreset) · Presets (manager, control) · FrameData · I18n · About · Debug
    InstanceTracker · Regression · the framework extensions (Meta, Visibility, Versioning,
-   Analysis, Presets, About, Debug, I18n, InstanceTracker, Regression)
+   Analysis, Presets, About, Debug, I18n, InstanceTracker, Regression, Licensing)
+   KernelLayout · KernelMetadata · KernelTile · KernelValues · KernelCatalog (the D-009 contract)
+   Overlay (parts, composites, the parameters seam, draw kits)
+   Licensing (statuses, entitlement, provider, registry, extension) · LicensingProviders
+   (static, trial, file) · Watermark · Digest (SHA-256, HMAC)
    HostProfile + Quirks (registry table) · RenderSnapshot (+ codec) · Image (CPU, GpuImage)
  ────────────────────────────────────────────────────────────────────────────────────────────────
- Hosts: DaVinci Resolve (live), the mini host (CI, CPU and Metal frames), Nuke and Natron
-        (profiles only so far)
+ Hosts: DaVinci Resolve (live), the mini host (CI, CPU, Metal, and OpenCL frames; the interact
+        and draw suites), Nuke and Natron (profiles only so far)
 ```
 
 `ofxgrip_core` is the GripTruck candidate: it is what AEGrip will share once the extraction in
@@ -140,6 +154,49 @@ message. An effect is a table of callbacks owned by a `CFactory`; the `ofxgrip_e
 the handle is a real `Effect`, so every framework extension applies. The Rust crate wraps the
 contract with a `Manifest` builder, an `Effect` trait, and a `bundle!` macro that exports the
 three OpenFX symbols; panics never cross the boundary.
+
+## Kernels (phase 3)
+
+A kernel is a Slang compute entry point over the `GripKernel` module (D-009). `slangc` runs when
+the author asks (`scripts/ofxgrip-slang.sh`, or `OFXGRIP_SLANGC` at configure time) and its
+outputs are checked in beside the `.slang`: the Metal source, the C++ source, and one reflection
+JSON per target. `ofxgrip_add_kernels` embeds them into the plug-in through
+`cmake/KernelAdapter.cpp.in`, which compiles the C++ output against the vendored Slang prelude
+with the entry symbols renamed per kernel. `KernelLayout` reads the JSON: Metal binds by slot
+(buffers, textures, samplers, function constants), the C++ target by byte offset into one globals
+block. `KernelMetadata` reads the `FxGripShader` JSON5 block into parameters. `KernelValues`
+resolves a binding plan (which parameter feeds which member, texture, or constant) and packs the
+uniforms and the specialization constants for a render. `KernelCatalog` holds every
+implementation of a kernel and resolves one per API, host, and OS: native for the backend, host,
+and OS; native for the backend; the universal Slang build; the CPU build. A `KernelEffect`
+declares to the host only the GPU paths where every kernel resolves. `KernelEngine` dispatches:
+the CPU backend runs the prelude's entry over `ITexture` views in bands; the Metal backend makes
+textures over the host's buffers (or blits through an intermediate when the row stride is not
+aligned), sets the function constants, and commits without waiting. OpenFX frames are bottom-up,
+so the tile carries `kGripTileRowsAscend` and `gripImagePixel` reads rows ascending.
+
+## Overlays (phase 3)
+
+`OverlayControl` owns `OverlayPart`s and routes pen and key events to them: hit test last-added
+first, drag with the Shift (constrain, snap 45°) and Alt (fine, anchor center) modifiers, draw
+through a `DrawKit`. Parts read and write parameters through the `OverlayParameters` seam, so
+the core tests them without a host. The adapter's `OverlayInteract` creates the effect's control
+over `EffectOverlayParameters`, brackets a drag in one `EditScope`, and draws through the draw
+suite when the host passes a draw context or through OpenGL otherwise; the OpenGL kit is a no-op
+without a current context. Hosts that draw their own point handles (`Quirk::NativeXYHandles`)
+make the point parts stand down.
+
+## Licensing (phase 3)
+
+The manifest's `licensing` block names a provider from the `LicensingProviders` registry. The
+`LicensingExtension` caches the provider's status so a render never waits on a store, mirrors it
+into a hidden toggle, puts the license state and the entitlement into every snapshot, and offers
+the provider's actions through one momentary menu. After `render()` the adapter applies the
+watermark the status calls for (`RenderWatermark`): the CPU composite in the core, or the Metal
+and OpenCL blend kernels over the host's frame, placed on the whole frame so tiles line up. The
+built-in providers are `static` (a status set in code), `trial` (days from first run, recorded in
+the support folder), and `file` (an HMAC-SHA256-signed license file). A store's provider
+registers beside them under its own name (D-010).
 
 ## Rules
 

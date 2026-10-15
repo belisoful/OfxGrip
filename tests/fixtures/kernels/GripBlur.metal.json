@@ -1,0 +1,1025 @@
+{
+    "version": "1.1",
+    "parameters": [
+        {
+            "name": "uniforms",
+            "binding": {"kind": "constantBuffer", "index": 0},
+            "type": {
+                "kind": "constantBuffer",
+                "elementType": {
+                    "kind": "struct",
+                    "name": "BlurUniforms",
+                    "fields": [
+                        {
+                            "name": "radius",
+                            "type": {
+                                "kind": "scalar",
+                                "scalarType": "float32",
+                                "sizes": [
+                                    {"kind": "uniform", "value": 4, "alignment": 4}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 0, "size": 4, "elementStride": 0}
+                        },
+                        {
+                            "name": "tint",
+                            "type": {
+                                "kind": "vector",
+                                "elementCount": 3,
+                                "elementType": {
+                                    "kind": "scalar",
+                                    "scalarType": "float32"
+                                },
+                                "sizes": [
+                                    {"kind": "uniform", "value": 16, "alignment": 16}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                        },
+                        {
+                            "name": "offset",
+                            "type": {
+                                "kind": "vector",
+                                "elementCount": 2,
+                                "elementType": {
+                                    "kind": "scalar",
+                                    "scalarType": "int32"
+                                },
+                                "sizes": [
+                                    {"kind": "uniform", "value": 8, "alignment": 8}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 32, "size": 8, "elementStride": 4}
+                        },
+                        {
+                            "name": "enabled",
+                            "type": {
+                                "kind": "scalar",
+                                "scalarType": "bool",
+                                "sizes": [
+                                    {"kind": "uniform", "value": 1, "alignment": 1}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 40, "size": 1, "elementStride": 0}
+                        }
+                    ],
+                    "sizes": [
+                        {"kind": "uniform", "value": 48, "alignment": 16}
+                    ]
+                },
+                "containerVarLayout": {
+                    "binding": {"kind": "constantBuffer", "index": 0}
+                },
+                "elementVarLayout": {
+                    "type": {
+                        "kind": "struct",
+                        "name": "BlurUniforms",
+                        "fields": [
+                            {
+                                "name": "radius",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "float32",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 4, "alignment": 4}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 0, "size": 4, "elementStride": 0}
+                            },
+                            {
+                                "name": "tint",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 3,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "float32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                            },
+                            {
+                                "name": "offset",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 2,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "int32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 8, "alignment": 8}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 32, "size": 8, "elementStride": 4}
+                            },
+                            {
+                                "name": "enabled",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "bool",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 1, "alignment": 1}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 40, "size": 1, "elementStride": 0}
+                            }
+                        ],
+                        "sizes": [
+                            {"kind": "uniform", "value": 48, "alignment": 16}
+                        ]
+                    },
+                    "binding": {"kind": "uniform", "offset": 0, "size": 48, "elementStride": 0}
+                },
+                "sizes": [
+                    {"kind": "constantBuffer", "value": 1}
+                ]
+            }
+        },
+        {
+            "name": "tile",
+            "binding": {"kind": "constantBuffer", "index": 1},
+            "type": {
+                "kind": "constantBuffer",
+                "elementType": {
+                    "kind": "struct",
+                    "name": "GripTile",
+                    "fields": [
+                        {
+                            "name": "destinationBounds",
+                            "type": {
+                                "kind": "vector",
+                                "elementCount": 4,
+                                "elementType": {
+                                    "kind": "scalar",
+                                    "scalarType": "float32"
+                                },
+                                "sizes": [
+                                    {"kind": "uniform", "value": 16, "alignment": 16}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                        },
+                        {
+                            "name": "pixelScale",
+                            "type": {
+                                "kind": "vector",
+                                "elementCount": 2,
+                                "elementType": {
+                                    "kind": "scalar",
+                                    "scalarType": "float32"
+                                },
+                                "sizes": [
+                                    {"kind": "uniform", "value": 8, "alignment": 8}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 16, "size": 8, "elementStride": 4}
+                        },
+                        {
+                            "name": "textureCount",
+                            "type": {
+                                "kind": "scalar",
+                                "scalarType": "uint32",
+                                "sizes": [
+                                    {"kind": "uniform", "value": 4, "alignment": 4}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 24, "size": 4, "elementStride": 0}
+                        },
+                        {
+                            "name": "reserved",
+                            "type": {
+                                "kind": "scalar",
+                                "scalarType": "uint32",
+                                "sizes": [
+                                    {"kind": "uniform", "value": 4, "alignment": 4}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 28, "size": 4, "elementStride": 0}
+                        },
+                        {
+                            "name": "textures",
+                            "type": {
+                                "kind": "array",
+                                "elementCount": 16,
+                                "elementType": {
+                                    "kind": "struct",
+                                    "name": "GripTileMap",
+                                    "fields": [
+                                        {
+                                            "name": "u",
+                                            "type": {
+                                                "kind": "vector",
+                                                "elementCount": 4,
+                                                "elementType": {
+                                                    "kind": "scalar",
+                                                    "scalarType": "float32"
+                                                },
+                                                "sizes": [
+                                                    {"kind": "uniform", "value": 16, "alignment": 16}
+                                                ]
+                                            },
+                                            "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                                        },
+                                        {
+                                            "name": "v",
+                                            "type": {
+                                                "kind": "vector",
+                                                "elementCount": 4,
+                                                "elementType": {
+                                                    "kind": "scalar",
+                                                    "scalarType": "float32"
+                                                },
+                                                "sizes": [
+                                                    {"kind": "uniform", "value": 16, "alignment": 16}
+                                                ]
+                                            },
+                                            "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                                        }
+                                    ],
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 32, "alignment": 16}
+                                    ]
+                                },
+                                "uniformStride": 32,
+                                "sizes": [
+                                    {"kind": "uniform", "value": 512, "alignment": 16}
+                                ]
+                            },
+                            "binding": {"kind": "uniform", "offset": 32, "size": 512, "elementStride": 32}
+                        }
+                    ],
+                    "sizes": [
+                        {"kind": "uniform", "value": 544, "alignment": 16}
+                    ]
+                },
+                "containerVarLayout": {
+                    "binding": {"kind": "constantBuffer", "index": 0}
+                },
+                "elementVarLayout": {
+                    "type": {
+                        "kind": "struct",
+                        "name": "GripTile",
+                        "fields": [
+                            {
+                                "name": "destinationBounds",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 4,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "float32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                            },
+                            {
+                                "name": "pixelScale",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 2,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "float32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 8, "alignment": 8}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 16, "size": 8, "elementStride": 4}
+                            },
+                            {
+                                "name": "textureCount",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "uint32",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 4, "alignment": 4}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 24, "size": 4, "elementStride": 0}
+                            },
+                            {
+                                "name": "reserved",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "uint32",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 4, "alignment": 4}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 28, "size": 4, "elementStride": 0}
+                            },
+                            {
+                                "name": "textures",
+                                "type": {
+                                    "kind": "array",
+                                    "elementCount": 16,
+                                    "elementType": {
+                                        "kind": "struct",
+                                        "name": "GripTileMap",
+                                        "fields": [
+                                            {
+                                                "name": "u",
+                                                "type": {
+                                                    "kind": "vector",
+                                                    "elementCount": 4,
+                                                    "elementType": {
+                                                        "kind": "scalar",
+                                                        "scalarType": "float32"
+                                                    },
+                                                    "sizes": [
+                                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                                    ]
+                                                },
+                                                "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                                            },
+                                            {
+                                                "name": "v",
+                                                "type": {
+                                                    "kind": "vector",
+                                                    "elementCount": 4,
+                                                    "elementType": {
+                                                        "kind": "scalar",
+                                                        "scalarType": "float32"
+                                                    },
+                                                    "sizes": [
+                                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                                    ]
+                                                },
+                                                "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                                            }
+                                        ],
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 32, "alignment": 16}
+                                        ]
+                                    },
+                                    "uniformStride": 32,
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 512, "alignment": 16}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 32, "size": 512, "elementStride": 32}
+                            }
+                        ],
+                        "sizes": [
+                            {"kind": "uniform", "value": 544, "alignment": 16}
+                        ]
+                    },
+                    "binding": {"kind": "uniform", "offset": 0, "size": 544, "elementStride": 0}
+                },
+                "sizes": [
+                    {"kind": "constantBuffer", "value": 1}
+                ]
+            }
+        },
+        {
+            "name": "source",
+            "binding": {"kind": "shaderResource", "index": 0},
+            "type": {
+                "kind": "resource",
+                "baseShape": "texture2D",
+                "resultType": {
+                    "kind": "vector",
+                    "elementCount": 4,
+                    "elementType": {
+                        "kind": "scalar",
+                        "scalarType": "float32"
+                    }
+                },
+                "sizes": [
+                    {"kind": "shaderResource", "value": 1}
+                ]
+            }
+        },
+        {
+            "name": "matte",
+            "binding": {"kind": "shaderResource", "index": 1},
+            "type": {
+                "kind": "resource",
+                "baseShape": "texture2D",
+                "resultType": {
+                    "kind": "vector",
+                    "elementCount": 4,
+                    "elementType": {
+                        "kind": "scalar",
+                        "scalarType": "float32"
+                    }
+                },
+                "sizes": [
+                    {"kind": "shaderResource", "value": 1}
+                ]
+            }
+        },
+        {
+            "name": "destination",
+            "binding": {"kind": "shaderResource", "index": 2},
+            "type": {
+                "kind": "resource",
+                "baseShape": "texture2D",
+                "access": "readWrite",
+                "resultType": {
+                    "kind": "vector",
+                    "elementCount": 4,
+                    "elementType": {
+                        "kind": "scalar",
+                        "scalarType": "float32"
+                    }
+                },
+                "sizes": [
+                    {"kind": "shaderResource", "value": 1}
+                ]
+            }
+        },
+        {
+            "name": "bilinear",
+            "binding": {"kind": "samplerState", "index": 0},
+            "type": {
+                "kind": "samplerState",
+                "sizes": [
+                    {"kind": "samplerState", "value": 1}
+                ]
+            }
+        },
+        {
+            "name": "TAPS",
+            "binding": {"kind": "specializationConstant", "index": 0},
+            "type": {
+                "kind": "scalar",
+                "scalarType": "int32",
+                "sizes": [
+                    {"kind": "specializationConstant", "value": 1}
+                ]
+            }
+        },
+        {
+            "name": "INVERT",
+            "binding": {"kind": "specializationConstant", "index": 1},
+            "type": {
+                "kind": "scalar",
+                "scalarType": "bool",
+                "sizes": [
+                    {"kind": "specializationConstant", "value": 1}
+                ]
+            }
+        }
+    ],
+    "globalScope": {
+        "kind": "none",
+        "parameters": [
+            {
+                "name": "uniforms",
+                "binding": {"kind": "constantBuffer", "index": 0},
+                "type": {
+                    "kind": "constantBuffer",
+                    "elementType": {
+                        "kind": "struct",
+                        "name": "BlurUniforms",
+                        "fields": [
+                            {
+                                "name": "radius",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "float32",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 4, "alignment": 4}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 0, "size": 4, "elementStride": 0}
+                            },
+                            {
+                                "name": "tint",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 3,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "float32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                            },
+                            {
+                                "name": "offset",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 2,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "int32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 8, "alignment": 8}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 32, "size": 8, "elementStride": 4}
+                            },
+                            {
+                                "name": "enabled",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "bool",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 1, "alignment": 1}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 40, "size": 1, "elementStride": 0}
+                            }
+                        ],
+                        "sizes": [
+                            {"kind": "uniform", "value": 48, "alignment": 16}
+                        ]
+                    },
+                    "containerVarLayout": {
+                        "binding": {"kind": "constantBuffer", "index": 0}
+                    },
+                    "elementVarLayout": {
+                        "type": {
+                            "kind": "struct",
+                            "name": "BlurUniforms",
+                            "fields": [
+                                {
+                                    "name": "radius",
+                                    "type": {
+                                        "kind": "scalar",
+                                        "scalarType": "float32",
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 4, "alignment": 4}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 0, "size": 4, "elementStride": 0}
+                                },
+                                {
+                                    "name": "tint",
+                                    "type": {
+                                        "kind": "vector",
+                                        "elementCount": 3,
+                                        "elementType": {
+                                            "kind": "scalar",
+                                            "scalarType": "float32"
+                                        },
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 16, "alignment": 16}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                                },
+                                {
+                                    "name": "offset",
+                                    "type": {
+                                        "kind": "vector",
+                                        "elementCount": 2,
+                                        "elementType": {
+                                            "kind": "scalar",
+                                            "scalarType": "int32"
+                                        },
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 8, "alignment": 8}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 32, "size": 8, "elementStride": 4}
+                                },
+                                {
+                                    "name": "enabled",
+                                    "type": {
+                                        "kind": "scalar",
+                                        "scalarType": "bool",
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 1, "alignment": 1}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 40, "size": 1, "elementStride": 0}
+                                }
+                            ],
+                            "sizes": [
+                                {"kind": "uniform", "value": 48, "alignment": 16}
+                            ]
+                        },
+                        "binding": {"kind": "uniform", "offset": 0, "size": 48, "elementStride": 0}
+                    },
+                    "sizes": [
+                        {"kind": "constantBuffer", "value": 1}
+                    ]
+                }
+            },
+            {
+                "name": "tile",
+                "binding": {"kind": "constantBuffer", "index": 1},
+                "type": {
+                    "kind": "constantBuffer",
+                    "elementType": {
+                        "kind": "struct",
+                        "name": "GripTile",
+                        "fields": [
+                            {
+                                "name": "destinationBounds",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 4,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "float32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                            },
+                            {
+                                "name": "pixelScale",
+                                "type": {
+                                    "kind": "vector",
+                                    "elementCount": 2,
+                                    "elementType": {
+                                        "kind": "scalar",
+                                        "scalarType": "float32"
+                                    },
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 8, "alignment": 8}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 16, "size": 8, "elementStride": 4}
+                            },
+                            {
+                                "name": "textureCount",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "uint32",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 4, "alignment": 4}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 24, "size": 4, "elementStride": 0}
+                            },
+                            {
+                                "name": "reserved",
+                                "type": {
+                                    "kind": "scalar",
+                                    "scalarType": "uint32",
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 4, "alignment": 4}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 28, "size": 4, "elementStride": 0}
+                            },
+                            {
+                                "name": "textures",
+                                "type": {
+                                    "kind": "array",
+                                    "elementCount": 16,
+                                    "elementType": {
+                                        "kind": "struct",
+                                        "name": "GripTileMap",
+                                        "fields": [
+                                            {
+                                                "name": "u",
+                                                "type": {
+                                                    "kind": "vector",
+                                                    "elementCount": 4,
+                                                    "elementType": {
+                                                        "kind": "scalar",
+                                                        "scalarType": "float32"
+                                                    },
+                                                    "sizes": [
+                                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                                    ]
+                                                },
+                                                "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                                            },
+                                            {
+                                                "name": "v",
+                                                "type": {
+                                                    "kind": "vector",
+                                                    "elementCount": 4,
+                                                    "elementType": {
+                                                        "kind": "scalar",
+                                                        "scalarType": "float32"
+                                                    },
+                                                    "sizes": [
+                                                        {"kind": "uniform", "value": 16, "alignment": 16}
+                                                    ]
+                                                },
+                                                "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                                            }
+                                        ],
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 32, "alignment": 16}
+                                        ]
+                                    },
+                                    "uniformStride": 32,
+                                    "sizes": [
+                                        {"kind": "uniform", "value": 512, "alignment": 16}
+                                    ]
+                                },
+                                "binding": {"kind": "uniform", "offset": 32, "size": 512, "elementStride": 32}
+                            }
+                        ],
+                        "sizes": [
+                            {"kind": "uniform", "value": 544, "alignment": 16}
+                        ]
+                    },
+                    "containerVarLayout": {
+                        "binding": {"kind": "constantBuffer", "index": 0}
+                    },
+                    "elementVarLayout": {
+                        "type": {
+                            "kind": "struct",
+                            "name": "GripTile",
+                            "fields": [
+                                {
+                                    "name": "destinationBounds",
+                                    "type": {
+                                        "kind": "vector",
+                                        "elementCount": 4,
+                                        "elementType": {
+                                            "kind": "scalar",
+                                            "scalarType": "float32"
+                                        },
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 16, "alignment": 16}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                                },
+                                {
+                                    "name": "pixelScale",
+                                    "type": {
+                                        "kind": "vector",
+                                        "elementCount": 2,
+                                        "elementType": {
+                                            "kind": "scalar",
+                                            "scalarType": "float32"
+                                        },
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 8, "alignment": 8}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 16, "size": 8, "elementStride": 4}
+                                },
+                                {
+                                    "name": "textureCount",
+                                    "type": {
+                                        "kind": "scalar",
+                                        "scalarType": "uint32",
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 4, "alignment": 4}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 24, "size": 4, "elementStride": 0}
+                                },
+                                {
+                                    "name": "reserved",
+                                    "type": {
+                                        "kind": "scalar",
+                                        "scalarType": "uint32",
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 4, "alignment": 4}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 28, "size": 4, "elementStride": 0}
+                                },
+                                {
+                                    "name": "textures",
+                                    "type": {
+                                        "kind": "array",
+                                        "elementCount": 16,
+                                        "elementType": {
+                                            "kind": "struct",
+                                            "name": "GripTileMap",
+                                            "fields": [
+                                                {
+                                                    "name": "u",
+                                                    "type": {
+                                                        "kind": "vector",
+                                                        "elementCount": 4,
+                                                        "elementType": {
+                                                            "kind": "scalar",
+                                                            "scalarType": "float32"
+                                                        },
+                                                        "sizes": [
+                                                            {"kind": "uniform", "value": 16, "alignment": 16}
+                                                        ]
+                                                    },
+                                                    "binding": {"kind": "uniform", "offset": 0, "size": 16, "elementStride": 4}
+                                                },
+                                                {
+                                                    "name": "v",
+                                                    "type": {
+                                                        "kind": "vector",
+                                                        "elementCount": 4,
+                                                        "elementType": {
+                                                            "kind": "scalar",
+                                                            "scalarType": "float32"
+                                                        },
+                                                        "sizes": [
+                                                            {"kind": "uniform", "value": 16, "alignment": 16}
+                                                        ]
+                                                    },
+                                                    "binding": {"kind": "uniform", "offset": 16, "size": 16, "elementStride": 4}
+                                                }
+                                            ],
+                                            "sizes": [
+                                                {"kind": "uniform", "value": 32, "alignment": 16}
+                                            ]
+                                        },
+                                        "uniformStride": 32,
+                                        "sizes": [
+                                            {"kind": "uniform", "value": 512, "alignment": 16}
+                                        ]
+                                    },
+                                    "binding": {"kind": "uniform", "offset": 32, "size": 512, "elementStride": 32}
+                                }
+                            ],
+                            "sizes": [
+                                {"kind": "uniform", "value": 544, "alignment": 16}
+                            ]
+                        },
+                        "binding": {"kind": "uniform", "offset": 0, "size": 544, "elementStride": 0}
+                    },
+                    "sizes": [
+                        {"kind": "constantBuffer", "value": 1}
+                    ]
+                }
+            },
+            {
+                "name": "source",
+                "binding": {"kind": "shaderResource", "index": 0},
+                "type": {
+                    "kind": "resource",
+                    "baseShape": "texture2D",
+                    "resultType": {
+                        "kind": "vector",
+                        "elementCount": 4,
+                        "elementType": {
+                            "kind": "scalar",
+                            "scalarType": "float32"
+                        }
+                    },
+                    "sizes": [
+                        {"kind": "shaderResource", "value": 1}
+                    ]
+                }
+            },
+            {
+                "name": "matte",
+                "binding": {"kind": "shaderResource", "index": 1},
+                "type": {
+                    "kind": "resource",
+                    "baseShape": "texture2D",
+                    "resultType": {
+                        "kind": "vector",
+                        "elementCount": 4,
+                        "elementType": {
+                            "kind": "scalar",
+                            "scalarType": "float32"
+                        }
+                    },
+                    "sizes": [
+                        {"kind": "shaderResource", "value": 1}
+                    ]
+                }
+            },
+            {
+                "name": "destination",
+                "binding": {"kind": "shaderResource", "index": 2},
+                "type": {
+                    "kind": "resource",
+                    "baseShape": "texture2D",
+                    "access": "readWrite",
+                    "resultType": {
+                        "kind": "vector",
+                        "elementCount": 4,
+                        "elementType": {
+                            "kind": "scalar",
+                            "scalarType": "float32"
+                        }
+                    },
+                    "sizes": [
+                        {"kind": "shaderResource", "value": 1}
+                    ]
+                }
+            },
+            {
+                "name": "bilinear",
+                "binding": {"kind": "samplerState", "index": 0},
+                "type": {
+                    "kind": "samplerState",
+                    "sizes": [
+                        {"kind": "samplerState", "value": 1}
+                    ]
+                }
+            },
+            {
+                "name": "TAPS",
+                "binding": {"kind": "specializationConstant", "index": 0},
+                "type": {
+                    "kind": "scalar",
+                    "scalarType": "int32",
+                    "sizes": [
+                        {"kind": "specializationConstant", "value": 1}
+                    ]
+                }
+            },
+            {
+                "name": "INVERT",
+                "binding": {"kind": "specializationConstant", "index": 1},
+                "type": {
+                    "kind": "scalar",
+                    "scalarType": "bool",
+                    "sizes": [
+                        {"kind": "specializationConstant", "value": 1}
+                    ]
+                }
+            }
+        ]
+    },
+    "entryPoints": [
+        {
+            "name": "fxGripKernel",
+            "stage": "compute",
+            "scope": {
+                "kind": "none",
+                "parameters": [
+                    {
+                        "name": "tid",
+                        "semanticName": "SV_DISPATCHTHREADID",
+                        "type": {
+                            "kind": "vector",
+                            "elementCount": 3,
+                            "elementType": {
+                                "kind": "scalar",
+                                "scalarType": "uint32"
+                            },
+                            "sizes": [
+
+                            ]
+                        }
+                    }
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "tid",
+                    "semanticName": "SV_DISPATCHTHREADID",
+                    "type": {
+                        "kind": "vector",
+                        "elementCount": 3,
+                        "elementType": {
+                            "kind": "scalar",
+                            "scalarType": "uint32"
+                        },
+                        "sizes": [
+
+                        ]
+                    }
+                }
+            ],
+            "threadGroupSize": [8, 8, 1],
+            "bindings": [
+                {
+                    "name": "uniforms",
+                    "binding": {"kind": "constantBuffer", "index": 0, "used": 1}
+                },
+                {
+                    "name": "tile",
+                    "binding": {"kind": "constantBuffer", "index": 1, "used": 1}
+                },
+                {
+                    "name": "source",
+                    "binding": {"kind": "shaderResource", "index": 0, "used": 1}
+                },
+                {
+                    "name": "matte",
+                    "binding": {"kind": "shaderResource", "index": 1, "used": 1}
+                },
+                {
+                    "name": "destination",
+                    "binding": {"kind": "shaderResource", "index": 2, "used": 1}
+                },
+                {
+                    "name": "bilinear",
+                    "binding": {"kind": "samplerState", "index": 0, "used": 1}
+                },
+                {
+                    "name": "TAPS",
+                    "binding": {"kind": "specializationConstant", "index": 0, "used": 1}
+                },
+                {
+                    "name": "INVERT",
+                    "binding": {"kind": "specializationConstant", "index": 1, "used": 1}
+                }
+            ]
+        }
+    ],
+    "bindlessSpaceIndex": 1
+}

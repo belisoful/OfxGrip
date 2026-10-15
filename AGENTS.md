@@ -81,27 +81,41 @@ paraphrase their code. The official OpenFX headers are a separate case.
   `Codec`, `Plist`, `Flags`, `Manifest`, `ManifestJson`, `Rules`, `Events`, `Extension`,
   `HostServices`, `HostProfile`, `Quirks`, `RenderSnapshot`, `Image`, `Parameters`,
   `MetaManager`, `Preset`, `Presets`, `FrameData`, `I18n`, `About`, `Debug`, `InstanceTracker`,
-  `Regression`, and the framework extensions (`MetaExtension`, `VisibilityExtension`,
-  `VersioningExtension`, `AnalysisExtension`). These are the GripTruck candidates.
+  `Regression`, the kernel contract (`KernelLayout`, `KernelMetadata`, `KernelTile`,
+  `KernelValues`, `KernelCatalog`), the overlay model (`Overlay`), licensing (`Licensing`,
+  `LicensingProviders`, `Watermark`, `Digest`), and the framework extensions (`MetaExtension`,
+  `VisibilityExtension`, `VersioningExtension`, `AnalysisExtension`). These are the GripTruck
+  candidates.
 - `include/ofxgrip/ofx/` — the OpenFX adapter: `Suites`, `PropertySet`, `Actions`, `Descriptor`,
-  `Effect`, `Analysis`, `Plugin`, `OfxHostServices`, `ResolveExtensions`.
+  `Effect`, `KernelEffect`, `Interact`, `RenderWatermark`, `Analysis`, `Plugin`,
+  `OfxHostServices`, `ResolveExtensions`.
 - `include/ofxgrip/c/ofxgrip_c.h`, `src/c/` — the C contract. It is additive: a point release adds
   functions and never changes or removes one.
 - `rust/` — the Cargo workspace: `ofxgrip-sys` (raw bindings; links `OFXGRIP_BUILD_DIR` or builds
   the libraries with the `cmake` crate), `ofxgrip` (the safe API), `examples/gain-rs`. CMake builds
   and packages it with `-DOFXGRIP_BUILD_RUST=ON`.
-- `include/ofxgrip/gpu/` — the GPU backends: `MetalBackend` (macOS). Opaque handles only; no
-  Metal header is included from a public header.
+- `include/ofxgrip/gpu/` — the GPU backends: `MetalBackend` and `MetalKernelBackend` (macOS),
+  `OpenCLBackend`, the kernel engine (`KernelEngine`, `CpuKernelBackend`, `KernelCpu`), and the
+  watermark blends (`MetalWatermark`, `OpenCLWatermark`). Opaque handles only; no Metal or
+  OpenCL header is included from a public header.
+- `kernels/` — `GripKernel.slang`, OfxGrip's copy of the D-009 kernel module.
+- `external/slang-prelude/` — the Slang C++ prelude the CPU backend compiles emitted kernels
+  against (Apache-2.0 with LLVM exception).
 - `src/core/`, `src/ofx/`, `src/gpu/` — implementations, same split.
 - `minihost/` — the headless OFX host (library and `ofxgrip-minihost` CLI).
-- `plugins/` — `HostDump` (probe) and `Gain` (sample), each built into an `.ofx.bundle`.
+- `plugins/` — `HostDump` (probe), `Gain` (sample), and `Spot` (the Slang kernel sample with an
+  overlay and a trial license), each built into an `.ofx.bundle`.
 - `tests/core/`, `tests/ofx/`, `tests/gpu/`, `tests/c/`, `tests/integration/` — GoogleTest. Test files mirror
   the header they cover: `ManifestTests.cpp` covers `Manifest.hpp`. `tests/core/FakeServices.hpp`
   holds the in-memory host services the host-free tests share.
-- `cmake/` — `OfxGripPlugin.cmake` (bundle layout, `Info.plist`), sanitizer and coverage helpers.
-- `scripts/` — `install-bundle.sh`, `validate-bundle.py`, `coverage.sh`.
+- `cmake/` — `OfxGripPlugin.cmake` (bundle layout, `Info.plist`), `OfxGripKernels.cmake`
+  (`ofxgrip_add_kernels`: checked-in slangc outputs embedded through `KernelAdapter.cpp.in`),
+  sanitizer and coverage helpers.
+- `scripts/` — `install-bundle.sh`, `validate-bundle.py`, `coverage.sh`, `ofxgrip-slang.sh`
+  (regenerates a kernel's Metal and C++ sources and reflection JSON with `slangc`).
 - `Docs/` — `Plan.md`, `Architecture.md`, `Testing.md`.
-- `external/openfx/`, `external/metal-cpp/` — vendored headers and licenses.
+- `external/openfx/`, `external/metal-cpp/`, `external/slang-prelude/` — vendored headers and
+  licenses.
 
 Rules of the layering:
 
@@ -110,6 +124,12 @@ Rules of the layering:
 - Effect code asks `HostProfile::has(Quirk)` for host behavior, never for a host name.
 - Every parameter read and write goes through `ParameterService`, so the API-traffic events fire.
 - Render reads only the `RenderSnapshot` and the images handed to it. It mutates no instance state.
+- A kernel's generated sources (`<name>.metal`, `<name>.cpp`, the `.json` layouts) are checked
+  in beside the `.slang`. Regenerate with `scripts/ofxgrip-slang.sh` (or configure with
+  `-DOFXGRIP_SLANGC=<path>`) after editing a `.slang`; the build embeds the checked-in files
+  and never requires `slangc`.
+- The licensing status an instance renders under comes from the snapshot's license state; the
+  watermark goes on after `render()` in the adapter, on CPU, Metal, and OpenCL frames.
 - A Metal render encodes on the host's queue and commits without waiting. The only process-wide
   state on a render path is the backend's cache of immutable pipelines and reusable scratch
   buffers, under a mutex.

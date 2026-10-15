@@ -76,8 +76,15 @@ function(ofxgrip_add_plugin)
     RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_bundle_dir}/Contents/${_arch_dir}"
     OFXGRIP_BUNDLE_DIR "${_bundle_dir}")
   if(NOT WIN32)
-    # The host resolves OfxGetPlugin and OfxGetNumberOfPlugins by name; keep them exported.
+    # The host resolves OfxGetPlugin and OfxGetNumberOfPlugins by name; keep them exported and
+    # nothing else, so two plug-ins built on different OfxGrip or kernel versions never clash in
+    # one host process.
     set_target_properties(${_target} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    if(APPLE)
+      target_link_options(${_target} PRIVATE "-Wl,-exported_symbols_list,${PROJECT_SOURCE_DIR}/cmake/ofx-exports.txt")
+    else()
+      target_link_options(${_target} PRIVATE "-Wl,--version-script=${PROJECT_SOURCE_DIR}/cmake/ofx-exports.map")
+    endif()
   endif()
 
   if(APPLE)

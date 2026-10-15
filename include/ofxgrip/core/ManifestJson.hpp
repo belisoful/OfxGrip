@@ -22,6 +22,10 @@ OFXGRIP_NAMESPACE_BEGIN
     validated; call `EffectManifest::validate`. */
 Error parseManifestJson(std::string_view json, EffectManifest& out);
 
+/*! Parses a JSON array of parameter records in the manifest's vocabulary, as a kernel's
+    metadata block carries them. Introduced in OfxGrip 0.4.0. */
+Error parseParameterListJson(std::string_view json, std::vector<ParameterSpec>& out);
+
 /*! Serializes a manifest with two-space indentation. */
 std::string writeManifestJson(const EffectManifest& manifest);
 

@@ -5,8 +5,14 @@
 #if defined(OFXGRIP_HAS_METAL)
 #include <ofxgrip/gpu/MetalBackend.hpp>
 #endif
+#if defined(OFXGRIP_HAS_OPENCL)
+#include <ofxgrip/gpu/OpenCLBackend.hpp>
+#endif
 
+#include "ofxDrawSuite.h"
 #include "ofxGPURender.h"
+#include "ofxInteract.h"
+#include "ofxKeySyms.h"
 #include "ofxMemory.h"
 #include "ofxMessage.h"
 #include "ofxMultiThread.h"
@@ -106,7 +112,21 @@ private:
 	std::vector<std::unique_ptr<Clip>> clips_;
 };
 
+/*! An overlay interact descriptor or instance. The property set is the first member, so the
+    handle the plug-in sees is the object. */
+class InteractObject {
+public:
+	explicit InteractObject(Instance* owner) : instance(owner) {}
+	PropSet props;
+	Instance* instance;
+	OfxInteractHandle handle() noexcept { return reinterpret_cast<OfxInteractHandle>(this); }
+	static InteractObject* from(const void* h) noexcept { return reinterpret_cast<InteractObject*>(const_cast<void*>(h)); }
+};
+
 namespace {
+
+/*! The draw calls the current draw action records into; the draw context handle is the vector. */
+thread_local std::vector<DrawCall>* currentDrawCalls = nullptr;
 
 /*! The render task the current thread is inside. The output clip's image comes from here. */
 struct RenderTask {
@@ -116,7 +136,7 @@ struct RenderTask {
 	Point2D renderScale{1, 1};
 	Field field{Field::None};
 	GpuApi gpu{GpuApi::None};
-	void* gpuOutput{nullptr};                             /*!< The output frame's `MTLBuffer`. */
+	void* gpuOutput{nullptr};                             /*!< The output frame's `MTLBuffer` or `cl_mem`. */
 	const std::map<std::string, void*>* gpuInputs{nullptr}; /*!< Clip name → input `MTLBuffer`. */
 };
 thread_local RenderTask* currentTask = nullptr;
@@ -583,6 +603,134 @@ struct HostSuites {
 		return kOfxStatErrBadHandle;
 	}
 
+	// interact suite
+	static OfxStatus interactSwapBuffers(OfxInteractHandle) { return kOfxStatOK; }
+	static OfxStatus interactRedraw(OfxInteractHandle handle)
+	{
+		if (handle == nullptr) {
+			return kOfxStatErrBadHandle;
+		}
+		InteractObject* object = InteractObject::from(handle);
+		if (object->instance != nullptr) {
+			object->instance->redrawRequests_++;
+		}
+		return kOfxStatOK;
+	}
+	static OfxStatus interactGetPropertySet(OfxInteractHandle handle, OfxPropertySetHandle* props)
+	{
+		if (handle == nullptr || props == nullptr) {
+			return kOfxStatErrBadHandle;
+		}
+		*props = InteractObject::from(handle)->props.handle();
+		return kOfxStatOK;
+	}
+
+	// draw suite: every call lands in the recorder of the draw action in progress
+	static std::vector<DrawCall>* drawTarget(OfxDrawContextHandle context)
+	{
+		auto* target = reinterpret_cast<std::vector<DrawCall>*>(context);
+		return target != nullptr && target == currentDrawCalls ? target : nullptr;
+	}
+	static OfxStatus drawGetColour(OfxDrawContextHandle context, OfxStandardColour colour, OfxRGBAColourF* out)
+	{
+		if (drawTarget(context) == nullptr || out == nullptr) {
+			return kOfxStatFailed;
+		}
+		if (colour < kOfxStandardColourOverlayBackground || colour > kOfxStandardColourOverlayText) {
+			return kOfxStatErrValue;
+		}
+		const float level = colour == kOfxStandardColourOverlayBackground ? 0.0f : 1.0f;
+		*out = OfxRGBAColourF{level, level, colour == kOfxStandardColourOverlayText ? 0.5f : level, 1.0f};
+		return kOfxStatOK;
+	}
+	static OfxStatus drawSetColour(OfxDrawContextHandle context, const OfxRGBAColourF* colour)
+	{
+		std::vector<DrawCall>* target = drawTarget(context);
+		if (target == nullptr || colour == nullptr) {
+			return kOfxStatFailed;
+		}
+		DrawCall call;
+		call.op = "colour";
+		call.colour[0] = colour->r;
+		call.colour[1] = colour->g;
+		call.colour[2] = colour->b;
+		call.colour[3] = colour->a;
+		target->push_back(std::move(call));
+		return kOfxStatOK;
+	}
+	static OfxStatus drawSetLineWidth(OfxDrawContextHandle context, float width)
+	{
+		std::vector<DrawCall>* target = drawTarget(context);
+		if (target == nullptr) {
+			return kOfxStatFailed;
+		}
+		DrawCall call;
+		call.op = "width";
+		call.width = width;
+		target->push_back(std::move(call));
+		return kOfxStatOK;
+	}
+	static OfxStatus drawSetLineStipple(OfxDrawContextHandle context, OfxDrawLineStipplePattern pattern)
+	{
+		std::vector<DrawCall>* target = drawTarget(context);
+		if (target == nullptr) {
+			return kOfxStatFailed;
+		}
+		if (pattern < kOfxDrawLineStipplePatternSolid || pattern > kOfxDrawLineStipplePatternDotDash) {
+			return kOfxStatErrValue;
+		}
+		DrawCall call;
+		call.op = "stipple";
+		call.stipple = static_cast<int>(pattern);
+		target->push_back(std::move(call));
+		return kOfxStatOK;
+	}
+	static OfxStatus drawDraw(OfxDrawContextHandle context, OfxDrawPrimitive primitive, const OfxPointD* points, int count)
+	{
+		std::vector<DrawCall>* target = drawTarget(context);
+		if (target == nullptr) {
+			return kOfxStatFailed;
+		}
+		if (points == nullptr || count <= 0) {
+			return kOfxStatErrValue;
+		}
+		DrawCall call;
+		switch (primitive) {
+		case kOfxDrawPrimitiveLines: call.op = "lines"; break;
+		case kOfxDrawPrimitiveLineStrip: call.op = "strip"; break;
+		case kOfxDrawPrimitiveLineLoop: call.op = "loop"; break;
+		case kOfxDrawPrimitiveRectangle: call.op = "rect"; break;
+		case kOfxDrawPrimitivePolygon: call.op = "polygon"; break;
+		case kOfxDrawPrimitiveEllipse: call.op = "ellipse"; break;
+		default: return kOfxStatErrValue;
+		}
+		if ((primitive == kOfxDrawPrimitiveRectangle || primitive == kOfxDrawPrimitiveEllipse) && count != 2) {
+			return kOfxStatErrValue;
+		}
+		for (int i = 0; i < count; ++i) {
+			call.points.push_back({points[i].x, points[i].y});
+		}
+		target->push_back(std::move(call));
+		return kOfxStatOK;
+	}
+	static OfxStatus drawDrawText(OfxDrawContextHandle context, const char* text, const OfxPointD* position, int alignment)
+	{
+		std::vector<DrawCall>* target = drawTarget(context);
+		if (target == nullptr) {
+			return kOfxStatFailed;
+		}
+		if (text == nullptr || position == nullptr) {
+			return kOfxStatErrValue;
+		}
+		DrawCall call;
+		call.op = "text";
+		call.text = text;
+		call.points.push_back({position->x, position->y});
+		call.align = alignment;
+		target->push_back(std::move(call));
+		return kOfxStatOK;
+	}
+
 	static const void* fetchSuite(OfxPropertySetHandle hostProps, const char* suiteName, int suiteVersion)
 	{
 		MiniHost* host = hostFor(hostProps);
@@ -634,6 +782,14 @@ struct HostSuites {
 		}
 		if (name == kOfxTimeLineSuite && suiteVersion == 1) {
 			static const OfxTimeLineSuiteV1 s = {&getTime, &gotoTime, &getTimeBounds};
+			return &s;
+		}
+		if (name == kOfxInteractSuite && suiteVersion == 1) {
+			static const OfxInteractSuiteV1 s = {&interactSwapBuffers, &interactRedraw, &interactGetPropertySet};
+			return &s;
+		}
+		if (name == kOfxDrawSuite && suiteVersion == 1 && host->options().drawSuite) {
+			static const OfxDrawSuiteV1 s = {&drawGetColour, &drawSetColour, &drawSetLineWidth, &drawSetLineStipple, &drawDraw, &drawDrawText};
 			return &s;
 		}
 		return nullptr;
@@ -703,6 +859,7 @@ HostOptions HostOptions::nuke()
 	o.supportsCustomAnimation = true;
 	o.maxPages = 8;
 	o.withheldSuites = {"OfxDialogSuite"};
+	o.drawSuite = false;
 	return o;
 }
 
@@ -724,6 +881,7 @@ HostOptions HostOptions::natron()
 	o.supportsCustomInteract = true;
 	o.supportsParametric = true;
 	o.maxPages = 16;
+	o.drawSuite = false;
 	return o;
 }
 
@@ -784,7 +942,7 @@ void MiniHost::fillHostProps()
 	p.setInt(kOfxImageEffectPropRenderQualityDraft, 1);
 	p.setString(kOfxImageEffectPropMetalRenderSupported, options_.metalRenderSupported ? "true" : "false");
 	p.setString(kOfxImageEffectPropCudaRenderSupported, "false");
-	p.setString(kOfxImageEffectPropOpenCLRenderSupported, "false");
+	p.setString(kOfxImageEffectPropOpenCLRenderSupported, options_.openCLRenderSupported ? "true" : "false");
 	p.setString(kOfxImageEffectPropOpenGLRenderSupported, "false");
 	for (const std::string& name : options_.withheldHostProps) {
 		p.withhold(name);
@@ -842,6 +1000,25 @@ OfxStatus MiniHost::describe()
 	OfxStatus status = dispatch(kOfxActionDescribe, descriptor_->handle(), nullptr, nullptr);
 	if (status != kOfxStatOK && status != kOfxStatReplyDefault) {
 		return status;
+	}
+	overlayEntry_ = nullptr;
+	overlayVersion_ = 0;
+	interactDescriptor_.reset();
+	if (void* entry = descriptor_->props().getPointer(kOfxImageEffectPluginPropOverlayInteractV2)) {
+		overlayEntry_ = reinterpret_cast<OfxPluginEntryPoint*>(entry);
+		overlayVersion_ = 2;
+	} else if (void* legacy = descriptor_->props().getPointer(kOfxImageEffectPluginPropOverlayInteractV1)) {
+		overlayEntry_ = reinterpret_cast<OfxPluginEntryPoint*>(legacy);
+		overlayVersion_ = 1;
+	}
+	if (overlayEntry_ != nullptr) {
+		interactDescriptor_ = std::make_unique<InteractObject>(nullptr);
+		interactDescriptor_->props.setString(kOfxPropType, "OfxTypeInteract");
+		logAction("interact:describe");
+		const OfxStatus interactStatus = overlayEntry_(kOfxActionDescribe, interactDescriptor_->handle(), nullptr, nullptr);
+		if (interactStatus != kOfxStatOK && interactStatus != kOfxStatReplyDefault) {
+			return interactStatus;
+		}
 	}
 	const std::vector<std::string> wanted = descriptor_->props().getStrings(kOfxImageEffectPropSupportedContexts);
 	describedContexts_.clear();
@@ -965,6 +1142,25 @@ std::unique_ptr<Instance> MiniHost::createInstance(const std::string& context, c
 		instance->object_->instance = nullptr;
 		return nullptr;
 	}
+	if (overlayEntry_ != nullptr && options_.supportsOverlays) {
+		auto interact = std::make_unique<InteractObject>(instance.get());
+		PropSet& ip = interact->props;
+		ip.setString(kOfxPropType, "OfxTypeInteractInstance");
+		ip.setPointer(kOfxPropEffectInstance, instance->effectHandle());
+		ip.setPointer(kOfxPropInstanceData, nullptr);
+		ip.setDoubles(kOfxInteractPropPixelScale, {1.0, 1.0});
+		ip.setDoubles(kOfxInteractPropBackgroundColour, {0.0, 0.0, 0.0});
+		ip.setInt(kOfxInteractPropBitDepth, interactDescriptor_ ? interactDescriptor_->props.getInt(kOfxInteractPropBitDepth, 8) : 8);
+		ip.setInt(kOfxInteractPropHasAlpha, interactDescriptor_ ? interactDescriptor_->props.getInt(kOfxInteractPropHasAlpha, 0) : 0);
+		instance->interact_ = std::move(interact);
+		instance->overlayVersion_ = overlayVersion_;
+		logAction("interact:createInstance");
+		const OfxStatus interactStatus = overlayEntry_(kOfxActionCreateInstance, instance->interact_->handle(), nullptr, nullptr);
+		if (interactStatus != kOfxStatOK && interactStatus != kOfxStatReplyDefault) {
+			instance->interact_.reset();
+			instance->overlayVersion_ = 0;
+		}
+	}
 	return instance;
 }
 
@@ -978,9 +1174,125 @@ Instance::Instance(MiniHost& host, std::unique_ptr<EffectObject> object, std::st
 
 Instance::~Instance()
 {
+	if (interact_ && host_.overlayEntry_ != nullptr) {
+		// The interact instance goes before the effect instance it belongs to.
+		host_.logAction("interact:destroyInstance");
+		host_.overlayEntry_(kOfxActionDestroyInstance, interact_->handle(), nullptr, nullptr);
+		interact_.reset();
+	}
 	if (object_ && object_->instance != nullptr) {
 		dispatch(kOfxActionDestroyInstance, nullptr, nullptr);
 	}
+}
+
+int Instance::editDepth() const
+{
+	return object_->params().editDepth;
+}
+
+std::vector<std::string> Instance::editNames() const
+{
+	return object_->params().editNames;
+}
+
+OfxStatus Instance::interactDispatch(const char* action, PropSet* inArgs)
+{
+	if (!interact_ || host_.overlayEntry_ == nullptr) {
+		return kOfxStatErrBadHandle;
+	}
+	host_.logAction(std::string("interact:") + action);
+	return host_.overlayEntry_(action, interact_->handle(), inArgs ? inArgs->handle() : nullptr, nullptr);
+}
+
+void Instance::fillInteractArgs(PropSet& in, Time time) const
+{
+	in.setPointer(kOfxPropEffectInstance, object_->handle());
+	in.setDouble(kOfxPropTime, time);
+	in.setDoubles(kOfxImageEffectPropRenderScale, {1.0, 1.0});
+	in.setDoubles(kOfxInteractPropPixelScale, {pixelScale_.x, pixelScale_.y});
+	in.setDoubles(kOfxInteractPropBackgroundColour, {0.0, 0.0, 0.0});
+	// Q-OFX-ANY-010: the viewport size left the 1.5 headers; hosts still send it.
+	in.setInts("OfxInteractPropViewportSize", {project_.width, project_.height});
+	if (screenPixelRatio_ > 0.0) {
+		in.setDouble("OfxInteractPropScreenPixelRatio", screenPixelRatio_);
+	}
+}
+
+OfxStatus Instance::overlayDraw(Time time, Point2D pixelScale)
+{
+	pixelScale_ = pixelScale;
+	drawCalls_.clear();
+	PropSet in;
+	fillInteractArgs(in, time);
+	if (overlayVersion_ == 2) {
+		in.setPointer(kOfxInteractPropDrawContext, &drawCalls_);
+	}
+	currentDrawCalls = &drawCalls_;
+	const OfxStatus status = interactDispatch(kOfxInteractActionDraw, &in);
+	currentDrawCalls = nullptr;
+	return status == kOfxStatReplyDefault ? kOfxStatOK : status;
+}
+
+OfxStatus Instance::overlayPenDown(Point2D canonical, Time time, double pressure)
+{
+	PropSet in;
+	fillInteractArgs(in, time);
+	in.setDoubles(kOfxInteractPropPenPosition, {canonical.x, canonical.y});
+	in.setInts(kOfxInteractPropPenViewportPosition, {static_cast<int>(canonical.x), static_cast<int>(canonical.y)});
+	in.setDouble(kOfxInteractPropPenPressure, pressure);
+	return interactDispatch(kOfxInteractActionPenDown, &in);
+}
+
+OfxStatus Instance::overlayPenMotion(Point2D canonical, Time time, double pressure)
+{
+	PropSet in;
+	fillInteractArgs(in, time);
+	in.setDoubles(kOfxInteractPropPenPosition, {canonical.x, canonical.y});
+	in.setInts(kOfxInteractPropPenViewportPosition, {static_cast<int>(canonical.x), static_cast<int>(canonical.y)});
+	in.setDouble(kOfxInteractPropPenPressure, pressure);
+	return interactDispatch(kOfxInteractActionPenMotion, &in);
+}
+
+OfxStatus Instance::overlayPenUp(Point2D canonical, Time time, double pressure)
+{
+	PropSet in;
+	fillInteractArgs(in, time);
+	in.setDoubles(kOfxInteractPropPenPosition, {canonical.x, canonical.y});
+	in.setInts(kOfxInteractPropPenViewportPosition, {static_cast<int>(canonical.x), static_cast<int>(canonical.y)});
+	in.setDouble(kOfxInteractPropPenPressure, pressure);
+	return interactDispatch(kOfxInteractActionPenUp, &in);
+}
+
+OfxStatus Instance::overlayKeyDown(int keySymbol, const std::string& keyString, Time time)
+{
+	PropSet in;
+	fillInteractArgs(in, time);
+	in.setInt(kOfxPropKeySym, keySymbol);
+	in.setString(kOfxPropKeyString, keyString);
+	return interactDispatch(kOfxInteractActionKeyDown, &in);
+}
+
+OfxStatus Instance::overlayKeyUp(int keySymbol, const std::string& keyString, Time time)
+{
+	PropSet in;
+	fillInteractArgs(in, time);
+	in.setInt(kOfxPropKeySym, keySymbol);
+	in.setString(kOfxPropKeyString, keyString);
+	return interactDispatch(kOfxInteractActionKeyUp, &in);
+}
+
+OfxStatus Instance::overlayGainFocus(Time time)
+{
+	PropSet in;
+	fillInteractArgs(in, time);
+	return interactDispatch(kOfxInteractActionGainFocus, &in);
+}
+
+OfxStatus Instance::overlayLoseFocus(Time time)
+{
+	PropSet in;
+	fillInteractArgs(in, time);
+	return interactDispatch(kOfxInteractActionLoseFocus, &in);
 }
 
 OfxStatus Instance::dispatch(const char* action, PropSet* inArgs, PropSet* outArgs)
@@ -1268,6 +1580,32 @@ RenderResult Instance::render(const RenderRequest& request)
 		result.gpu = GpuApi::Metal;
 	}
 #endif
+#if defined(OFXGRIP_HAS_OPENCL)
+	std::shared_ptr<opencl::OpenCLContext> openclContext;
+	std::vector<opencl::OpenCLBuffer> openclBuffers;
+	opencl::OpenCLBuffer openclOutput;
+	if (request.gpu == GpuApi::OpenCL && host_.options().openCLRenderSupported && result.gpu == GpuApi::None) {
+		PropSet* descriptor = host_.descriptorProps();
+		const bool pluginSupportsOpenCL = descriptor != nullptr && descriptor->getString(kOfxImageEffectPropOpenCLRenderSupported, "false") == "true";
+		if (pluginSupportsOpenCL) {
+			openclContext = opencl::OpenCLContext::systemDefault();
+		}
+	}
+	if (openclContext) {
+		for (const auto& clip : object_->clips()) {
+			std::shared_ptr<const ImageBuffer> image = clip->isOutput() ? nullptr : clip->image();
+			if (!image) {
+				continue;
+			}
+			openclBuffers.push_back(openclContext->newBuffer(image->bytes().size(), image->bytes().data()));
+			gpuInputHandles[clip->name()] = openclBuffers.back().handle();
+		}
+		openclOutput = openclContext->newBuffer(result.image.bytes().size());
+		gpuOutputHandle = openclOutput.handle();
+		gpuQueue = openclContext->queue();
+		result.gpu = GpuApi::OpenCL;
+	}
+#endif
 
 	PropSet seq;
 	seq.setDoubles(kOfxImageEffectPropFrameRange, {request.time, request.time});
@@ -1280,6 +1618,10 @@ RenderResult Instance::render(const RenderRequest& request)
 	seq.setInt(kOfxImageEffectPropMetalEnabled, result.gpu == GpuApi::Metal ? 1 : 0);
 	if (result.gpu == GpuApi::Metal) {
 		seq.setPointer(kOfxImageEffectPropMetalCommandQueue, gpuQueue);
+	}
+	seq.setInt(kOfxImageEffectPropOpenCLEnabled, result.gpu == GpuApi::OpenCL ? 1 : 0);
+	if (result.gpu == GpuApi::OpenCL) {
+		seq.setPointer(kOfxImageEffectPropOpenCLCommandQueue, gpuQueue);
 	}
 	OfxStatus status = dispatch(kOfxImageEffectActionBeginSequenceRender, &seq, nullptr);
 	if (status != kOfxStatOK && status != kOfxStatReplyDefault) {
@@ -1327,7 +1669,10 @@ RenderResult Instance::render(const RenderRequest& request)
 				in.setPointer(kOfxImageEffectPropMetalCommandQueue, gpuQueue);
 			}
 			in.setInt(kOfxImageEffectPropCudaEnabled, 0);
-			in.setInt(kOfxImageEffectPropOpenCLEnabled, 0);
+			in.setInt(kOfxImageEffectPropOpenCLEnabled, result.gpu == GpuApi::OpenCL ? 1 : 0);
+			if (result.gpu == GpuApi::OpenCL) {
+				in.setPointer(kOfxImageEffectPropOpenCLCommandQueue, gpuQueue);
+			}
 			currentTask = &task;
 			const OfxStatus tileStatus = dispatch(kOfxImageEffectActionRender, &in, nullptr);
 			currentTask = nullptr;
@@ -1355,6 +1700,13 @@ RenderResult Instance::render(const RenderRequest& request)
 			result.status = kOfxStatFailed;
 		} else {
 			std::memcpy(result.image.bytes().data(), metalOutput.contents(), result.image.bytes().size());
+		}
+	}
+#endif
+#if defined(OFXGRIP_HAS_OPENCL)
+	if (openclContext) {
+		if (Error e = openclContext->finish(); e || openclContext->read(openclOutput.handle(), 0, result.image.bytes().size(), result.image.bytes().data())) {
+			result.status = kOfxStatFailed;
 		}
 	}
 #endif

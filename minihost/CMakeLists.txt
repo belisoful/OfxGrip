@@ -9,6 +9,9 @@ target_link_libraries(ofxgrip_minihost PUBLIC OfxGrip::core OfxGrip::openfx_head
 if(APPLE)
   target_link_libraries(ofxgrip_minihost PUBLIC OfxGrip::gpu_metal)
 endif()
+if(TARGET ofxgrip_gpu_opencl)
+  target_link_libraries(ofxgrip_minihost PUBLIC OfxGrip::gpu_opencl)
+endif()
 
 add_executable(ofxgrip-minihost main.cpp)
 target_link_libraries(ofxgrip-minihost PRIVATE OfxGrip::minihost)
