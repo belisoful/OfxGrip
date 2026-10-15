@@ -476,8 +476,10 @@ TEST(PresetsExtension, DrivesTheControl)
 	params.valueRef(kControl) = Value(4);
 	host.post(EventId::CreateInstance);
 	EXPECT_EQ(params.valueRef(kControl), Value(4));
-	// Save failing is reported.
-	host.fakes().pathService.support = std::filesystem::path("/dev/null/nowhere");
+	// Save failing is reported: a folder under a regular file cannot be created on any platform.
+	const std::filesystem::path blocker = freshDirectory("blocker") / "file";
+	std::ofstream(blocker) << "not a directory";
+	host.fakes().pathService.support = blocker / "nowhere";
 	host.fakes().feedbackService.messages.clear();
 	entries = ext->entries(kControl);
 	params.valueRef(kControl) = Value(static_cast<int>(entries.size() - 1));

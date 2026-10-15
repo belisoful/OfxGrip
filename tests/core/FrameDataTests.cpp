@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 
 using namespace ofxgrip;
 using namespace ofxgrip::testing;
@@ -156,9 +157,14 @@ TEST(FrameData, SpillsLargeRecordsToTheCacheFolder)
 	const Bytes whole = inline_.encode();
 	EXPECT_GT(whole.size(), 100u);
 	EXPECT_FALSE(inline_.isSpilled(1));
-	// An unwritable spill directory keeps the record inline.
+	// An unwritable spill directory (under a regular file) keeps the record inline.
+	const std::filesystem::path blocker = freshDirectory("blocker") / "file";
+	{
+		std::ofstream out(blocker);
+		out << "not a directory";
+	}
 	FrameData blocked;
-	blocked.setSpillDirectory("/dev/null/nowhere");
+	blocked.setSpillDirectory(blocker / "nowhere");
 	blocked.setSpillThreshold(1);
 	blocked.set(1, bytesOf(100, 3));
 	EXPECT_GT(blocked.encode().size(), 100u);
