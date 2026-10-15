@@ -9,6 +9,14 @@ if(NOT OFXGRIP_CARGO)
   message(FATAL_ERROR "OFXGRIP_BUILD_RUST is ON but cargo was not found")
 endif()
 
+# cargo found by absolute path still needs rustc on PATH; put its own directory first.
+get_filename_component(_cargo_dir "${OFXGRIP_CARGO}" DIRECTORY)
+if(WIN32)
+  set(_cargo_env "PATH=${_cargo_dir};$ENV{PATH}")
+else()
+  set(_cargo_env "PATH=${_cargo_dir}:$ENV{PATH}")
+endif()
+
 set(_rust_root "${PROJECT_SOURCE_DIR}/rust")
 set(_rust_target_dir "${CMAKE_BINARY_DIR}/rust-target")
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
@@ -39,7 +47,7 @@ set(_rust_binary "${OFXGRIP_RUST_BUNDLE_DIR}/Contents/${_arch_dir}/OfxGripGainRs
 
 add_custom_command(
   OUTPUT "${_cdylib}"
-  COMMAND ${CMAKE_COMMAND} -E env "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}"
+  COMMAND ${CMAKE_COMMAND} -E env "${_cargo_env}" "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}"
           "${OFXGRIP_CARGO}" build ${_cargo_profile_flag} --manifest-path "${_rust_root}/Cargo.toml" --workspace
   DEPENDS ofxgrip_c ofxgrip ofxgrip_core
   WORKING_DIRECTORY "${_rust_root}"
@@ -77,6 +85,6 @@ set_property(GLOBAL APPEND PROPERTY OFXGRIP_BUNDLES "${OFXGRIP_RUST_BUNDLE_DIR}"
 
 # The Rust crates' own tests, run by ctest beside the C++ suites.
 add_test(NAME rust.cargo_test
-  COMMAND ${CMAKE_COMMAND} -E env "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}" "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs"
+  COMMAND ${CMAKE_COMMAND} -E env "${_cargo_env}" "OFXGRIP_BUILD_DIR=${CMAKE_BINARY_DIR}" "CARGO_TARGET_DIR=${_rust_target_dir}" "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs"
           "${OFXGRIP_CARGO}" test ${_cargo_profile_flag} --manifest-path "${_rust_root}/Cargo.toml" -p ofxgrip
   WORKING_DIRECTORY "${_rust_root}")
