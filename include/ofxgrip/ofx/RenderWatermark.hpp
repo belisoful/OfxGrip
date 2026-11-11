@@ -6,8 +6,9 @@
 
 	Introduced in OfxGrip 0.4.0. The adapter calls this once per render when the licensing
 	extension asks for a mark. CPU frames composite in place; Metal and OpenCL frames run the
-	backend's blend kernel on the host's queue. Other GPU APIs report `Unsupported`, which fails
-	the render: an unlicensed frame never leaves without its mark.
+	backend's blend kernel on the host's queue; a CUDA frame is composited on the host between
+	two copies. Other GPU APIs report `Unsupported`, which fails the render: an unlicensed frame
+	never leaves without its mark.
 */
 #pragma once
 

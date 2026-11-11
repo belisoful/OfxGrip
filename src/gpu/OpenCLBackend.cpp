@@ -38,7 +38,9 @@ std::map<void*, std::shared_ptr<OpenCLContext>>& contexts()
 	return table;
 }
 
-cl_device_id firstGpuDevice()
+/*! The first GPU device of any platform, else the first CPU device (pocl on a machine or a CI
+    runner with no GPU). */
+cl_device_id firstDevice()
 {
 	cl_uint platformCount = 0;
 	if (clGetPlatformIDs(0, nullptr, &platformCount) != CL_SUCCESS || platformCount == 0) {
@@ -46,11 +48,13 @@ cl_device_id firstGpuDevice()
 	}
 	std::vector<cl_platform_id> platforms(platformCount);
 	clGetPlatformIDs(platformCount, platforms.data(), nullptr);
-	for (cl_platform_id platform : platforms) {
-		cl_device_id device = nullptr;
-		cl_uint count = 0;
-		if (clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, &count) == CL_SUCCESS && count > 0) {
-			return device;
+	for (const cl_device_type type : {static_cast<cl_device_type>(CL_DEVICE_TYPE_GPU), static_cast<cl_device_type>(CL_DEVICE_TYPE_CPU)}) {
+		for (cl_platform_id platform : platforms) {
+			cl_device_id device = nullptr;
+			cl_uint count = 0;
+			if (clGetDeviceIDs(platform, type, 1, &device, &count) == CL_SUCCESS && count > 0) {
+				return device;
+			}
 		}
 	}
 	return nullptr;
@@ -183,7 +187,7 @@ std::shared_ptr<OpenCLContext> OpenCLContext::forQueue(void* commandQueue)
 std::shared_ptr<OpenCLContext> OpenCLContext::systemDefault()
 {
 	static std::shared_ptr<OpenCLContext> context = []() -> std::shared_ptr<OpenCLContext> {
-		cl_device_id device = firstGpuDevice();
+		cl_device_id device = firstDevice();
 		if (device == nullptr) {
 			return nullptr;
 		}

@@ -33,10 +33,24 @@ struct EmbeddedKernel {
 	const unsigned char* cppLayout;
 	std::size_t cppLayoutLength;
 	void* cpuEntry;
+	/*! The SPIR-V module and its reflection JSON, for the Vulkan backend. Introduced in OfxGrip
+	    0.5.0; the length is 0 when the kernel has no SPIR-V build. */
+	const unsigned char* spirv;
+	std::size_t spirvLength;
+	const unsigned char* spirvLayout;
+	std::size_t spirvLayoutLength;
+	/*! The PTX module `nvcc` compiled from the emitted CUDA source, and the CUDA reflection
+	    JSON, for the CUDA backend. Introduced in OfxGrip 0.5.0; the length is 0 when the kernel
+	    has no PTX build. */
+	const unsigned char* cudaModule;
+	std::size_t cudaModuleLength;
+	const unsigned char* cudaLayout;
+	std::size_t cudaLayoutLength;
 };
 
-/*! The catalog record of an embedded kernel: the universal Metal build when the Metal source
-    was emitted, and the CPU build when the entry exists. */
+/*! The catalog record of an embedded kernel: one universal implementation for each build the
+    kernel embeds (Metal source, SPIR-V module, PTX module), and the CPU build when the entry
+    exists. */
 KernelRecord kernelRecordFor(const EmbeddedKernel& kernel);
 
 OFXGRIP_NAMESPACE_END

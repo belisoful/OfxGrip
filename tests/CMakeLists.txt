@@ -33,6 +33,7 @@ add_executable(ofxgrip_core_tests
   core/ParametersTests.cpp
   core/FrameworkExtensionsTests.cpp
   core/KernelTests.cpp
+  core/InferenceTests.cpp
   core/OverlayTests.cpp
   core/WatermarkTests.cpp
   core/LicensingTests.cpp)
@@ -47,9 +48,12 @@ add_executable(ofxgrip_ofx_tests
   ofx/PluginTests.cpp
   ofx/Phase2Tests.cpp
   ofx/InteractTests.cpp
-  ofx/LicensingEffectTests.cpp)
+  ofx/LicensingEffectTests.cpp
+  ofx/InferenceEffectTests.cpp)
 target_link_libraries(ofxgrip_ofx_tests PRIVATE OfxGrip::ofxgrip OfxGrip::minihost GTest::gtest_main)
-gtest_discover_tests(ofxgrip_ofx_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+# These tests share the support, cache, and log folders (user presets, the trial record, a
+# plug-in's log), so `ctest -j` runs them one at a time.
+gtest_discover_tests(ofxgrip_ofx_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache" RESOURCE_LOCK ofxgrip_test_folders)
 
 add_executable(ofxgrip_integration_tests
   integration/MiniHostTests.cpp
@@ -72,7 +76,9 @@ if(OFXGRIP_BUILD_RUST)
   target_compile_definitions(ofxgrip_integration_tests PRIVATE OFXGRIP_GAINRS_BUNDLE="${OFXGRIP_RUST_BUNDLE_DIR}")
   add_dependencies(ofxgrip_integration_tests ofxgrip_rust)
 endif()
-gtest_discover_tests(ofxgrip_integration_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+# These tests share the support, cache, and log folders (user presets, the trial record, a
+# plug-in's log), so `ctest -j` runs them one at a time.
+gtest_discover_tests(ofxgrip_integration_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache" RESOURCE_LOCK ofxgrip_test_folders)
 
 if(APPLE)
   add_executable(ofxgrip_gpu_tests gpu/MetalBackendTests.cpp)
@@ -84,6 +90,13 @@ add_executable(ofxgrip_kernel_tests gpu/KernelEngineTests.cpp)
 target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::kernels GTest::gtest_main)
 if(APPLE)
   target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::gpu_metal)
+endif()
+target_sources(ofxgrip_kernel_tests PRIVATE gpu/CudaBackendTests.cpp)
+target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::gpu_cuda)
+target_compile_definitions(ofxgrip_kernel_tests PRIVATE OFXGRIP_KERNEL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/kernels")
+if(TARGET ofxgrip_gpu_vulkan)
+  target_sources(ofxgrip_kernel_tests PRIVATE gpu/VulkanBackendTests.cpp)
+  target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::gpu_vulkan)
 endif()
 ofxgrip_add_kernels(TARGET ofxgrip_kernel_tests KERNELS fixtures/kernels/GripBlur.slang fixtures/kernels/GripInspect.slang)
 gtest_discover_tests(ofxgrip_kernel_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
@@ -97,3 +110,13 @@ endif()
 add_executable(ofxgrip_c_tests c/CContractTests.cpp)
 target_link_libraries(ofxgrip_c_tests PRIVATE OfxGrip::c OfxGrip::minihost GTest::gtest_main)
 gtest_discover_tests(ofxgrip_c_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+
+# The InferKit backend against a stand-in library that exports InferKit's C interface.
+add_library(ofxgrip_fake_inferkit MODULE fixtures/inferkit/FakeInferKit.cpp)
+target_link_libraries(ofxgrip_fake_inferkit PRIVATE nlohmann_json::nlohmann_json)
+set_target_properties(ofxgrip_fake_inferkit PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
+add_executable(ofxgrip_inference_tests inference/InferKitBackendTests.cpp)
+target_link_libraries(ofxgrip_inference_tests PRIVATE OfxGrip::inference GTest::gtest_main)
+target_compile_definitions(ofxgrip_inference_tests PRIVATE OFXGRIP_FAKE_INFERKIT="$<TARGET_FILE:ofxgrip_fake_inferkit>")
+add_dependencies(ofxgrip_inference_tests ofxgrip_fake_inferkit)
+gtest_discover_tests(ofxgrip_inference_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")

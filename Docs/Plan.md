@@ -51,7 +51,7 @@ The FxGrip profile (`Research/Analysis/FxGrip.md` §13) divides FxGrip into what
 | `FxGripMTLDeviceCache`, `FxGripImageBuffer` | `GpuImage` descriptor (API, device, queue, handle, layout) and a per-queue resource pool; CPU `ImageView` with pixel-format dispatch. | 0 (CPU), 1 (Metal) |
 | Licensing (`FxGripLicensing`, provider protocol) | `LicensingProvider` interface, entitlement, and `LicensingExtension` in the core with the built-in `static`, `trial`, and `file` providers; license state in the render snapshot; the watermark after render on CPU, Metal, and OpenCL frames. Providers per store are a separate decision (D-010). | 3 |
 | Shader metadata (`FxGripShaderMetadata`, JSON5 in shader source) | `KernelMetadata` scans the `FxGripShader` JSON5 block in the `.slang` source into `ParameterSpec`s; `KernelLayout` binds the globals from the slangc reflection JSON (D-009). | 3 |
-| Inference seam (`FxGripInferenceBackend`) | InferKit through its planned C API, or a Wraz server over HTTP. Never on the render thread. | 4 |
+| Inference seam (`FxGripInferenceBackend`) | `Inference.hpp` (request, result, backend, passthrough, frame cache, runner) and `InferenceEffect`; `InferKitBackend` over InferKit's C interface. The engine runs on the runner's thread, never on the render thread. A Wraz server over HTTP is open. | 4 |
 | I18N, About and Debug menus, instance tracker, regression | Extensions over the event bus. Menus become choice parameters. | 2 |
 | Registrars (`PROPlugInRegistering`) | Bounded plug-in table with one generated `mainEntry` trampoline per plug-in; `OfxGetNumberOfPlugins`/`OfxGetPlugin` from one macro. | 0 |
 | FCPXML, workflow extensions, Space, RealityKit, StoreKit | Not applicable to OFX. The host scripting bridge (D-007) covers Resolve's Lua and Python later. | — |
@@ -94,11 +94,19 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: licensing (`Licensing.hpp`, `LicensingProviders.hpp`, `Watermark.hpp`, `Digest.hpp`): the provider interface and registry, the built-in `static`, `trial`, and `file` providers, the manifest's `licensing` declaration, the hidden status toggle and the licensing menu, the debug menu's override rows, the license state and entitlement in the snapshot, the C contract's `ofxgrip_snapshot_license_state` and the Rust `Snapshot::license_state`, and the watermark after render on CPU, Metal, and OpenCL frames.
 - Deferred to phase 4: the CUDA and Vulkan kernel backends and their golden images. The development Mac now has a Vulkan runtime (Homebrew `vulkan-headers`, `vulkan-loader`, `molten-vk`, `vulkan-tools`, `glslang`, installed 2026-10-15; the loader finds MoltenVK through `/opt/homebrew/etc/vulkan/icd.d` with no environment variable) and the CUDA 13.4.92 headers (`APIs/cuda-13.4.92/include`, from NVIDIA's `cuda_cudart` and `cuda_crt` redistributables; headers only, since no CUDA runtime or `nvcc` exists for Apple silicon). The Vulkan backend can therefore be built and golden-imaged here; the CUDA backend can be compiled against the headers with the driver API loaded at run time, but its golden images still need a machine with an NVIDIA GPU. The catalog already knows the targets and `scripts/ofxgrip-slang.sh` emits `.cu` and `.spv` on request.
 
-### Phase 4: Windows and Linux
+### Phase 4: Windows and Linux (in progress, 2026-11-11)
 
-- The CUDA and Vulkan kernel backends over the engine, with their golden images, on a machine that has the runtimes.
-- CMake toolchains, MSVC and GCC builds, the `Win64`, `Win-arm64ec`, `Linux-x86-64`, and `Linux-aarch64` bundle folders, Authenticode and old-glibc builds, CI runners. Windows on Arm means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL; no OpenFX host ships for Arm Linux yet. Live hosts are an open question (no Windows or Linux machine is known).
-- Inference through InferKit's C API or a Wraz server.
+- Done: the Linux build. GCC 13 builds every target with the project's warning set, and the suite passes on `Linux-aarch64` in a local Ubuntu 24.04 virtual machine. The CI job builds, tests, and validates the bundles on `ubuntu-24.04` x86_64 and blocks. A plug-in links libstdc++ and libgcc statically (`OFXGRIP_STATIC_CXX_RUNTIME`) and exports the three OpenFX entry points only.
+- Done: the Vulkan kernel backend (`VulkanBackend`, `VulkanKernelBackend`). No host delivers Vulkan frames, so it accelerates CPU renders on a device OfxGrip opens through a loader found at run time. `KernelLayout` reads the SPIR-V reflection as a descriptor layout. The conformance suite compares it with the CPU backend in every depth on MoltenVK (Apple M1 Max) and on Mesa's software driver (Linux). `KernelEffectFactory::setCpuAccelerator` and `OFXGRIP_KERNEL_ACCELERATOR` select it; the CPU build renders when the device or the dispatch fails.
+- Done: the CUDA kernel backend (`CudaDriver`, `CudaKernelBackend`, `CudaWatermark`) over the driver API, resolved at run time, with no toolkit needed to build. Its declarations of the driver's structures and functions were checked against NVIDIA's `cuda.h` 13.4.92. The tests drive it through a fake driver. `scripts/ofxgrip-slang.sh` emits the CUDA source and, with `nvcc`, the PTX; the kernels' CUDA sources and layouts are checked in.
+- Done: the inference seam (`Inference.hpp`, `InferenceEffect`) and the `InferKitBackend` adapter over InferKit 0.4.0's C interface, tested against a stand-in library.
+- Done: `OFXGRIP_AUTHENTICODE_COMMAND` signs each built `.ofx` on Windows. The OpenCL test context falls back to a CPU device, so the OpenCL tests run on pocl.
+- Open: the CUDA backend has not run on an NVIDIA GPU. No PTX exists for the sample or fixture kernels, so no effect declares CUDA yet and no CUDA golden image exists. This needs a machine with `nvcc` and an NVIDIA driver.
+- Open: the Windows build. The MSVC job compiled the core, the kernels, the adapter, the mini host, and the C contract before phase 4; the plug-ins, the tests, and the phase 4 sources have not been compiled by MSVC. The job stays non-blocking until a run confirms it. Windows on Arm means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL. The static C runtime on Windows is undecided.
+- Open: an old-glibc build. The bundle built on Ubuntu 24.04 needs glibc 2.38. A release build belongs on the oldest distribution to support (a `manylinux`-style container).
+- Open: the Linux plug-in links `libOpenCL.so.1` and `libGL.so.1` at load time. Opening them at run time, as the Vulkan loader and the CUDA driver are, removes the last load-time dependency on a GPU runtime.
+- Open: a Wraz server backend over HTTP, a disk tier for the inference cache, and interactive renders that return before the model finishes.
+- Open: live hosts. No Windows or Linux machine with Resolve is known; no OpenFX host ships for Arm Linux.
 
 ## 4. Layout
 
@@ -117,21 +125,23 @@ OfxGrip/
                    Rules, Events, Extension, HostServices, HostProfile, Quirks, RenderSnapshot,
                    Image, Parameters, MetaManager, Preset, Presets, FrameData, I18n, About, Debug,
                    InstanceTracker, Regression, Kernel* (layout, metadata, tile, values, catalog),
-                   Overlay, Licensing, LicensingProviders, Watermark, Digest, and the framework
+                   Overlay, Licensing, LicensingProviders, Watermark, Digest, Inference, and the framework
                    extensions (Meta, Visibility, Versioning, Analysis, Licensing)
                    (GripTruck candidates, no OFX headers)
     ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,
-                   KernelEffect, Interact, RenderWatermark, Analysis, Plugin, OfxHostServices,
+                   KernelEffect, InferenceEffect, Interact, RenderWatermark, Analysis, Plugin, OfxHostServices,
                    ResolveExtensions
     gpu/           KernelEngine, CpuKernelBackend, KernelCpu; MetalBackend, MetalKernelBackend,
-                   MetalWatermark (macOS); OpenCLBackend, OpenCLWatermark; CUDA and Vulkan in phase 4
+                   MetalWatermark (macOS); OpenCLBackend, OpenCLWatermark; VulkanBackend,
+                   VulkanKernelBackend; CudaDriver, CudaKernelBackend, CudaWatermark
+    inference/     InferKitBackend, the adapter over InferKit's C interface
     c/             ofxgrip_c.h, the C contract
   src/             implementation, same split (src/c holds the contract)
   rust/            the Rust workspace: ofxgrip-sys, ofxgrip, examples/gain-rs
   minihost/        the headless OFX host library and `ofxgrip-minihost` CLI
   plugins/         HostDump (probe), Gain (sample), Spot (kernel sample)
-  tests/           GoogleTest: unit tests per header, GPU backend and kernel tests, mini-host
-                   integration tests, artifact tests
+  tests/           GoogleTest: unit tests per header, GPU backend and kernel tests, inference
+                   tests, mini-host integration tests, artifact tests
   scripts/         install-bundle.sh, validate-bundle.py, coverage.sh, ofxgrip-slang.sh
   .github/         CI workflows
   local/           reference clones (ignored)
@@ -159,8 +169,10 @@ The Full Check must pass before a commit.
 5. Coverage with the `coverage` preset at or above the gate in `CMakeLists.txt` (`OFXGRIP_COVERAGE_MIN`). The gate covers the product code (core, adapter, plug-ins); the mini host is reported separately. Phase 0 set the gate at 80% (measured 84%); phase 1 raises it to 85% (measured 88.7% on 2026-10-14); it rises to 90% as the tests grow, toward the developer's goal of complete coverage.
 6. `scripts/validate-bundle.py` on every built bundle.
 
-CI runs the same steps on `macos-26`, and the build-and-test subset on `ubuntu-24.04` and
-`windows-2025` once phase 4 lands.
+CI runs the same steps on `macos-26` and the build-and-test subset on `ubuntu-24.04`, both
+blocking. The `windows-2025` job runs the same subset and stays non-blocking until a run confirms
+the MSVC build. The Linux build is also checked locally in a Lima virtual machine
+(`Docs/Testing.md`) when a change touches platform code.
 
 ## 7. Open items for the developer
 
@@ -169,8 +181,10 @@ CI runs the same steps on `macos-26`, and the build-and-test subset on `ubuntu-2
 | The Rust crates live under `rust/` in this repository; a separate repository is a later choice | Decided for now |
 | metal-cpp: approved and vendored under `external/metal-cpp`; the Metal backend is built | Done |
 | Slang compiler (`slangc`): optional at build time (`OFXGRIP_SLANGC`); generated sources are checked in | Done |
-| Windows and Linux machines with Resolve for live tests | Phase 4 |
+| Windows and Linux machines with Resolve for live tests | Phase 4, open |
+| A machine with `nvcc` and an NVIDIA GPU, for the kernels' PTX and the CUDA golden images | Phase 4, open |
+| The Vulkan headers: found on the build machine today; vendoring them makes every build carry the Vulkan backend | Open |
 | Licensing providers per store (FxFactory, key server); the built-ins are store-neutral | Open, D-010 |
-| CUDA and Vulkan kernel backends (need a machine with the runtimes) | Phase 4 |
+| CUDA and Vulkan kernel backends | Built; Vulkan verified on two drivers, CUDA against a fake driver only |
 | Natron as a second free OFX host | Phase 4 |
 | Computer use (or the developer driving Resolve) for the per-page probes | Phase 1, open |

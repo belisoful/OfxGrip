@@ -8,6 +8,7 @@ Date: 2026-10-15. Phase 3.
  Plug-in author (C++, or Rust through the C contract)
    manifest (EffectManifest, C++, JSON, or the C/Rust builders) · Effect subclass or callback
    table · Slang kernels (GripKernel module; slangc outputs checked in) or hand-written MSL and OpenCL
+   · an InferenceBackend for a model
  ────────────────────────────────────────────────────────────────────────────────────────────────
  ofxgrip_c (include/ofxgrip/c) · rust/ofxgrip-sys · rust/ofxgrip
    the C contract over the adapter: manifest building, one callback table per effect, the render
@@ -20,15 +21,18 @@ Date: 2026-10-15. Phase 3.
    Descriptor manifest → OFX descriptor, clips, parameters (registry handling rules applied)
    Effect     the author base: hooks, parameter objects, framework extensions, snapshot
               building, RenderContext, EditScope, presets, analysis, createOverlay
-   KernelEffect  an effect whose render dispatches a resolved kernel through the engine
+   KernelEffect  an effect whose render dispatches a resolved kernel through the engine, on the
+              frame's backend or on a CPU-frame accelerator
+   InferenceEffect  an effect whose render runs the source frame through an InferenceBackend
    Interact   OverlayInteract over the draw suite or OpenGL; the interact trampolines
-   RenderWatermark  the licensing watermark after render, on CPU, Metal, and OpenCL frames
+   RenderWatermark  the licensing watermark after render, on CPU, Metal, OpenCL, and CUDA frames
    Analysis   the analysis pass over clipGetImage inside a parameter action
    OfxHostServices  HostServices over the suites: parameters, persistence, feedback, threads,
                     time, paths, log
    Actions · PropertySet · Suites · ResolveExtensions
  ──────────────────────────────── HostServices (abstract) ──────────────────────────────────────
- ofxgrip_kernels · ofxgrip_gpu_metal (macOS) · ofxgrip_gpu_opencl (include/ofxgrip/gpu)
+ ofxgrip_kernels · ofxgrip_gpu_metal (macOS) · ofxgrip_gpu_opencl · ofxgrip_gpu_vulkan
+ · ofxgrip_gpu_cuda (include/ofxgrip/gpu)
    KernelEngine  the backends by API; a dispatch carries the layout, the plan, the packed
                  uniforms and constants, the window, and the images
    CpuKernelBackend  the Slang C++ prelude: ITexture views over CPU frames, bands on the
@@ -37,7 +41,16 @@ Date: 2026-10-15. Phase 3.
                  buffers over MTLBuffer frames and buffer-backed textures (metal-cpp)
    MetalKernelBackend  the engine's Metal path: function constants, textures, samplers
    OpenCLBackend  a context per cl_command_queue: program cache, buffers, blocking fills
-   MetalWatermark · OpenCLWatermark  the blend kernels behind RenderWatermark
+   VulkanBackend  OfxGrip's own compute device behind a loader opened at run time: SPIR-V
+                 pipelines, float RGBA uploads, one job per dispatch
+   VulkanKernelBackend  the engine's accelerator for CPU frames
+   CudaDriver    the CUDA driver API as a table of functions resolved at run time
+   CudaKernelBackend  the engine's CUDA path: PTX modules, texture and surface objects over
+                 the host's device memory, launches on the host's stream
+   MetalWatermark · OpenCLWatermark · CudaWatermark  the marks behind RenderWatermark
+ ──────────────────────────────────────────────────────────────────�
+ ofxgrip_inference (include/ofxgrip/inference)
+   InferKitBackend  an InferenceBackend over InferKit's C interface, opened at run time
  ────────────────────────────────────────────────────────────────────────────────────────────────
  ofxgrip_core (host-neutral, include/ofxgrip/core; no OpenFX include)
    Types · Error · Value · Codec · Plist · Flags · Manifest (+ JSON, target presets, presets
@@ -49,10 +62,11 @@ Date: 2026-10-15. Phase 3.
    Overlay (parts, composites, the parameters seam, draw kits)
    Licensing (statuses, entitlement, provider, registry, extension) · LicensingProviders
    (static, trial, file) · Watermark · Digest (SHA-256, HMAC)
+   Inference (request, result, backend, passthrough, frame cache, runner)
    HostProfile + Quirks (registry table) · RenderSnapshot (+ codec) · Image (CPU, GpuImage)
  ────────────────────────────────────────────────────────────────────────────────────────────────
- Hosts: DaVinci Resolve (live), the mini host (CI, CPU, Metal, and OpenCL frames; the interact
-        and draw suites), Nuke and Natron (profiles only so far)
+ Hosts: DaVinci Resolve (live, macOS), the mini host (CI on macOS and Linux; CPU, Metal, and
+        OpenCL frames; the interact and draw suites), Nuke and Natron (profiles only so far)
 ```
 
 `ofxgrip_core` is the GripTruck candidate: it is what AEGrip will share once the extraction in
@@ -159,12 +173,13 @@ three OpenFX symbols; panics never cross the boundary.
 
 A kernel is a Slang compute entry point over the `GripKernel` module (D-009). `slangc` runs when
 the author asks (`scripts/ofxgrip-slang.sh`, or `OFXGRIP_SLANGC` at configure time) and its
-outputs are checked in beside the `.slang`: the Metal source, the C++ source, and one reflection
-JSON per target. `ofxgrip_add_kernels` embeds them into the plug-in through
-`cmake/KernelAdapter.cpp.in`, which compiles the C++ output against the vendored Slang prelude
-with the entry symbols renamed per kernel. `KernelLayout` reads the JSON: Metal binds by slot
-(buffers, textures, samplers, function constants), the C++ target by byte offset into one globals
-block. `KernelMetadata` reads the `FxGripShader` JSON5 block into parameters. `KernelValues`
+outputs are checked in beside the `.slang`: the Metal source, the C++ source, the SPIR-V module,
+the CUDA source, and one reflection JSON per target. `ofxgrip_add_kernels` embeds them into the
+plug-in through `cmake/KernelAdapter.cpp.in`, which compiles the C++ output against the vendored
+Slang prelude with the entry symbols renamed per kernel. `KernelLayout` reads the JSON in three
+forms: Metal binds by slot (buffers, textures, samplers, function constants), the C++ and CUDA
+targets by byte offset into one globals block, and SPIR-V by one descriptor index space in set 0
+with constants by specialization ID. `KernelMetadata` reads the `FxGripShader` JSON5 block into parameters. `KernelValues`
 resolves a binding plan (which parameter feeds which member, texture, or constant) and packs the
 uniforms and the specialization constants for a render. `KernelCatalog` holds every
 implementation of a kernel and resolves one per API, host, and OS: native for the backend, host,
@@ -174,6 +189,77 @@ the CPU backend runs the prelude's entry over `ITexture` views in bands; the Met
 textures over the host's buffers (or blits through an intermediate when the row stride is not
 aligned), sets the function constants, and commits without waiting. OpenFX frames are bottom-up,
 so the tile carries `kGripTileRowsAscend` and `gripImagePixel` reads rows ascending.
+
+## The Vulkan accelerator (phase 4)
+
+No OpenFX host delivers Vulkan frames, so the Vulkan backend serves CPU renders. A dispatch
+names it in `KernelDispatch::accelerator`, and the engine runs a dispatch with a CPU destination
+on that backend. `VulkanContext` opens the loader at run time (`vulkan-1.dll`, `libvulkan.so.1`,
+`libvulkan.1.dylib`), picks the device with a compute queue (a discrete GPU first, a software
+device last), and enables the shader features a kernel's SPIR-V may declare. A job uploads each
+source as float RGBA, binds the uniforms, the tile, the sources, the sampler, and the
+destination from the descriptor layout, dispatches, and reads the float destination back before
+it returns. A module whose SPIR-V version or capabilities the device lacks is refused with the
+capability named. The texel conversions are the CPU backend's, so one SPIR-V build serves every
+depth and layout.
+
+- A `KernelEffectFactory` opts in with `setCpuAccelerator(GpuApi::Vulkan)`. The default is the
+  CPU backend.
+- `OFXGRIP_KERNEL_ACCELERATOR` (`vulkan` or `none`), read at the load action, overrides the
+  setting. The load action logs the accelerator and opens its device.
+- No device, no SPIR-V build, or a failed accelerated dispatch → the CPU build renders the frame
+  and the log says why.
+- macOS reaches Metal through MoltenVK. A machine with no GPU runs Mesa's software driver.
+
+## CUDA (phase 4)
+
+`CudaDriver` declares the part of the CUDA driver API the backend calls and resolves it from
+`nvcuda.dll` or `libcuda.so.1` at run time, so the backend builds without a CUDA toolkit and a
+plug-in loads without an NVIDIA driver. `CudaKernelBackend` runs in the context the host made
+current and on the host's stream. It loads the kernel's PTX once per context, binds the globals
+block the CUDA reflection layout describes, and launches one block per threadgroup:
+
+- The uniforms and the tile → device memory, by pointer.
+- A source → a texture object with normalized coordinates, bilinear filtering, and clamp-to-edge
+  addressing: over the host's pitched memory when the frame meets the device's texture
+  alignment, over an array filled by a copy otherwise (and always on the Fusion page,
+  Q-RESOLVE-031).
+- The destination → a surface object over a float RGBA array, copied into the window of the
+  host's frame after the launch.
+- A specialization constant → a plain value in the block.
+
+The emitted kernel writes raw float RGBA, so the backend renders 32-bit float RGBA frames. The
+globals live in the module's constant memory, which every launch of the module shares, so the
+backend waits for the stream under the module's lock. The PTX comes from NVIDIA's `nvcc`
+(`scripts/ofxgrip-slang.sh --targets cuda --nvcc <path>`, or `OFXGRIP_NVCC` at configure time).
+A kernel with no PTX has no CUDA implementation, and its effect does not declare CUDA.
+
+## Inference (phase 4)
+
+`Inference.hpp` is the seam between an effect and the engine that runs a model: named inputs and
+scalar parameters in, named outputs out, synchronously. The framework links no engine.
+`PassthroughInferenceBackend` returns its input, so an effect renders without weights.
+`InferenceRunner` runs a backend on a thread of its own while the caller waits and polls for an
+abort; an aborted call returns at once and the run still completes. `InferenceCache` keeps each
+frame's output under a signature (the backend, the render scale, the frame's parameters); a new
+signature clears it, and the least recently used frames leave past the byte limit.
+`InferenceEffect` is the effect template: cache, source → request → runner → output →
+destination, with the output converted to the destination's depth and layout and resampled when
+the model returns another size. `InferKitBackend` adapts InferKit's C interface, opened from a
+library path at run time: an image crosses as a float pixel buffer with the top row first, and a
+pixel-buffer output becomes an image with the bottom row first.
+
+## Platforms (phase 4)
+
+- **macOS.** One universal binary in `Contents/MacOS`, signed with its resources.
+- **Linux.** `Contents/Linux-x86-64` or `Contents/Linux-aarch64`. A version script exports the
+  three OpenFX entry points. `OFXGRIP_STATIC_CXX_RUNTIME` (on by default) links libstdc++ and
+  libgcc into the plug-in, so the bundle does not depend on the host's C++ runtime. The C
+  library of the build machine sets the oldest distribution a bundle loads on.
+- **Windows.** `Contents/Win64`, or `Contents/Win-arm64ec` for an ARM64EC build.
+  `OFXGRIP_AUTHENTICODE_COMMAND` signs each built `.ofx`.
+- Each GPU runtime is opened at run time where the platform allows it (Vulkan, CUDA, InferKit),
+  so its absence makes a backend unavailable and never stops the plug-in from loading.
 
 ## Overlays (phase 3)
 
@@ -192,8 +278,9 @@ The manifest's `licensing` block names a provider from the `LicensingProviders` 
 `LicensingExtension` caches the provider's status so a render never waits on a store, mirrors it
 into a hidden toggle, puts the license state and the entitlement into every snapshot, and offers
 the provider's actions through one momentary menu. After `render()` the adapter applies the
-watermark the status calls for (`RenderWatermark`): the CPU composite in the core, or the Metal
-and OpenCL blend kernels over the host's frame, placed on the whole frame so tiles line up. The
+watermark the status calls for (`RenderWatermark`): the CPU composite in the core, the Metal
+and OpenCL blend kernels over the host's frame, or the CPU composite between two copies of a
+CUDA frame, placed on the whole frame so tiles line up. The
 built-in providers are `static` (a status set in code), `trial` (days from first run, recorded in
 the support folder), and `file` (an HMAC-SHA256-signed license file). A store's provider
 registers beside them under its own name (D-010).

@@ -48,7 +48,7 @@ Error KernelEngine::run(const KernelDispatch& dispatch)
 	if (dispatch.layout == nullptr || dispatch.implementation == nullptr || dispatch.plan == nullptr) {
 		return Error::make(ErrorCode::InvalidParameter, "The kernel dispatch lacks a layout, an implementation, or a plan");
 	}
-	const GpuApi api = dispatch.destination.gpu.api;
+	const GpuApi api = dispatch.destination.isGpu() ? dispatch.destination.gpu.api : dispatch.accelerator;
 	KernelBackend* target = backend(api);
 	if (target == nullptr || !target->available()) {
 		return Error::make(ErrorCode::MissingHostFeature, "No kernel backend serves this API").with("api", std::string(toString(api)));

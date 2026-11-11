@@ -8,7 +8,7 @@
 	Introduced in OfxGrip 0.4.0. A `KernelDispatch` names the kernel's layout and binding plan,
 	the packed uniforms and constants, the destination window, and the images the kernel reads,
 	each as a host GPU frame or a CPU view. The engine picks the backend by the destination's
-	API. Every backend fills the same `GripTile`, binds the same roles, and writes the same
+	API, and by the dispatch's accelerator for a CPU destination. Every backend fills the same `GripTile`, binds the same roles, and writes the same
 	pixels within the tolerance the conformance tests state, so an effect renders alike on every
 	path. Host libraries plan, section 10.
 */
@@ -52,6 +52,11 @@ struct KernelDispatch {
 	RectI window;                                /*!< The destination pixels to write. */
 	Point2D pixelScale{1, 1};
 	KernelImage destination;
+	/*! The backend that runs a dispatch whose destination is a CPU view. `None` is the CPU
+	    backend; `Vulkan` uploads the frames to OfxGrip's own device and reads the result back.
+	    Ignored for a GPU destination, which always runs on its own API. Introduced in OfxGrip
+	    0.5.0. */
+	GpuApi accelerator{GpuApi::None};
 	std::vector<KernelImage> sources;            /*!< The positional source images, in order. */
 	std::map<ParameterId, KernelImage> keyedImages; /*!< The images of keyed textures, by parameter. */
 	ThreadingService* threading{nullptr};        /*!< For the CPU backend; null runs single-threaded. */
@@ -78,9 +83,10 @@ public:
 	KernelBackend* backend(GpuApi api) const noexcept;
 	/*! The APIs with a registered, available backend. */
 	std::vector<GpuApi> availableApis() const;
-	/*! Runs a dispatch on the destination's backend. Fails with `MissingHostFeature` when no
-	    backend serves that API, and `InvalidParameter` when the dispatch lacks a layout, an
-	    implementation, or a plan. */
+	/*! Runs a dispatch on the destination's backend, or on the dispatch's accelerator when the
+	    destination is a CPU view. Fails with `MissingHostFeature` when no backend serves that
+	    API, and `InvalidParameter` when the dispatch lacks a layout, an implementation, or a
+	    plan. */
 	Error run(const KernelDispatch& dispatch);
 
 private:

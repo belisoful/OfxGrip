@@ -21,6 +21,10 @@ const unsigned char kSlangSource[] = {@OFXGRIP_KERNEL_SLANG_BYTES@};
 const unsigned char kMetalSource[] = {@OFXGRIP_KERNEL_METAL_BYTES@};
 const unsigned char kMetalLayout[] = {@OFXGRIP_KERNEL_METAL_JSON_BYTES@};
 const unsigned char kCppLayout[] = {@OFXGRIP_KERNEL_CPP_JSON_BYTES@};
+const unsigned char kSpirv[] = {@OFXGRIP_KERNEL_SPIRV_BYTES@};
+const unsigned char kSpirvLayout[] = {@OFXGRIP_KERNEL_SPIRV_JSON_BYTES@};
+const unsigned char kCudaModule[] = {@OFXGRIP_KERNEL_PTX_BYTES@};
+const unsigned char kCudaLayout[] = {@OFXGRIP_KERNEL_CUDA_JSON_BYTES@};
 
 void ofxgripCpuEntry(void* varyingInput, void* entryPointParams, void* globals)
 {
@@ -38,4 +42,8 @@ const ::ofxgrip::EmbeddedKernel ofxgrip_embedded_kernel_@OFXGRIP_KERNEL_NAME@ = 
 	kMetalLayout, sizeof kMetalLayout - 1,
 	kCppLayout, sizeof kCppLayout - 1,
 	reinterpret_cast<void*>(&ofxgripCpuEntry),
+	kSpirv, sizeof kSpirv - 1,
+	kSpirvLayout, sizeof kSpirvLayout - 1,
+	kCudaModule, sizeof kCudaModule - 1,
+	kCudaLayout, sizeof kCudaLayout - 1,
 };

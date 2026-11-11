@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2026 Belisoful
 // The kernel engine over the two fixture kernels: the CPU backend on every platform, the Metal
-// backend on macOS, and the conformance between them: the same dispatch produces the same pixels.
+// backend on macOS, the Vulkan backend where a device opens, and the conformance between them:
+// the same dispatch produces the same pixels.
 #include <ofxgrip/gpu/CpuKernelBackend.hpp>
 #include <ofxgrip/gpu/KernelCpu.hpp>
 #include <ofxgrip/gpu/KernelEngine.hpp>
@@ -11,6 +12,10 @@
 #if defined(OFXGRIP_HAS_METAL)
 #include <ofxgrip/gpu/MetalBackend.hpp>
 #include <ofxgrip/gpu/MetalKernelBackend.hpp>
+#endif
+#if defined(OFXGRIP_HAS_VULKAN)
+#include <ofxgrip/gpu/VulkanBackend.hpp>
+#include <ofxgrip/gpu/VulkanKernelBackend.hpp>
 #endif
 
 #include <gtest/gtest.h>
@@ -167,11 +172,15 @@ TEST(KernelEngine, RegistersTheCpuBackendAndRefusesIncompleteDispatches)
 	ImageBuffer out = image({0, 0, 4, 4}, BitDepth::Float);
 	wrong.destination = cpuImage(out);
 	EXPECT_EQ(engine.run(wrong).code(), ErrorCode::InvalidParameter);
-	// The record carries both builds, the Slang source, and the entry name.
-	EXPECT_EQ(blur.record.implementations.size(), 2u);
+	// The record carries every embedded build, the Slang source, and the entry name. The
+	// fixtures have no PTX, so the record has no CUDA build.
+	ASSERT_EQ(blur.record.implementations.size(), 3u);
 	EXPECT_EQ(blur.record.implementations[0].api, GpuApi::Metal);
-	EXPECT_EQ(blur.record.implementations[1].api, GpuApi::None);
-	EXPECT_EQ(blur.record.implementations[1].entryPoint, "fxGripKernel");
+	EXPECT_EQ(blur.record.implementations[1].api, GpuApi::Vulkan);
+	EXPECT_FALSE(blur.record.implementations[1].layoutJson.empty());
+	EXPECT_EQ(blur.record.implementations[2].api, GpuApi::None);
+	EXPECT_EQ(blur.record.implementations[2].entryPoint, "fxGripKernel");
+	EXPECT_EQ(blur.catalog.resolve("GripBlur", GpuApi::Cuda, "", ""), nullptr);
 	EXPECT_NE(blur.record.slangSource.find("FxGripShader"), std::string::npos);
 }
 
@@ -610,6 +619,119 @@ kernel void scale(texture2d<float, access::sample> in [[texture(0)]], texture2d<
 	EXPECT_EQ(context->textureOverBuffer(in.handle(), 0, 17, 4, 2, MetalPixelFormat::RGBA32Float, false, none).code(), ErrorCode::Format);
 	EXPECT_EQ(context->textureOverBuffer(in.handle(), 0, rowBytes, 4, 200, MetalPixelFormat::RGBA32Float, false, none).code(), ErrorCode::BadIndex);
 	EXPECT_EQ(context->newTexture(0, 0, MetalPixelFormat::RGBA32Float, false, none).code(), ErrorCode::Format);
+}
+
+#endif
+
+#if defined(OFXGRIP_HAS_VULKAN)
+
+TEST(KernelEngine, VulkanBackendMatchesTheCpuBackend)
+{
+	if (!vulkan::VulkanContext::available()) {
+		GTEST_SKIP() << "No Vulkan device: " << vulkan::VulkanContext::unavailableReason();
+	}
+	VulkanKernelBackend::registerWithEngine();
+	VulkanKernelBackend::registerWithEngine();
+	ASSERT_NE(KernelEngine::shared().backend(GpuApi::Vulkan), nullptr);
+	EXPECT_TRUE(KernelEngine::shared().backend(GpuApi::Vulkan)->available());
+	Prepared cpu(OFXGRIP_KERNEL(GripInspect), GpuApi::None);
+	Prepared gpu(OFXGRIP_KERNEL(GripInspect), GpuApi::Vulkan);
+	ASSERT_NE(gpu.implementation, nullptr);
+	EXPECT_EQ(gpu.layout.form(), KernelBindingForm::Descriptors);
+	// A device without linear filtering of 32-bit float samples half-float sources.
+	const bool halfSources = !vulkan::VulkanContext::shared()->info().float32Linear;
+	const RectI bounds{0, 0, 24, 6};
+	for (BitDepth depth : {BitDepth::Float, BitDepth::Half, BitDepth::UInt8, BitDepth::UInt16}) {
+		ImageBuffer first = ramp(bounds, depth);
+		ImageBuffer second = ramp(bounds, BitDepth::Float);
+		ImageBuffer mask = ramp({4, 1, 20, 5}, BitDepth::Float, Components::Alpha);
+		ImageBuffer rampImage = ramp(bounds, depth, Components::RGB);
+		for (int mode : {0, 1, 2, 3, 4, 5, 6, 7, 8}) {
+			auto render = [&](const Prepared& prepared, GpuApi accelerator, ImageBuffer& out) {
+				KernelDispatch d = prepared.dispatch(inspectValues(mode), 0.5);
+				d.destination = cpuImage(out);
+				d.accelerator = accelerator;
+				d.sources = {cpuImage(first), cpuImage(second)};
+				d.keyedImages[kRamp] = cpuImage(rampImage);
+				d.keyedImages[kMask] = cpuImage(mask);
+				const Error e = KernelEngine::shared().run(d);
+				ASSERT_TRUE(e.ok()) << e.describe() << " mode " << mode << " depth " << toString(depth);
+			};
+			ImageBuffer cpuOut = image(bounds, depth);
+			ImageBuffer gpuOut = image(bounds, depth);
+			render(cpu, GpuApi::None, cpuOut);
+			render(gpu, GpuApi::Vulkan, gpuOut);
+			for (int y = bounds.y1; y < bounds.y2; ++y) {
+				for (int x = bounds.x1; x < bounds.x2; ++x) {
+					for (std::size_t ch = 0; ch < 4; ++ch) {
+						ASSERT_NEAR(at(cpuOut, x, y, ch), at(gpuOut, x, y, ch), depth == BitDepth::Half || halfSources ? 0.01f : 0.004f)
+						    << "mode " << mode << " depth " << toString(depth) << " at " << x << "," << y << " channel " << ch;
+					}
+				}
+			}
+		}
+	}
+}
+
+TEST(KernelEngine, VulkanBackendRendersAWindowAndRefusesBadDispatches)
+{
+	if (!vulkan::VulkanContext::available()) {
+		GTEST_SKIP() << "No Vulkan device: " << vulkan::VulkanContext::unavailableReason();
+	}
+	VulkanKernelBackend::registerWithEngine();
+	Prepared gpu(OFXGRIP_KERNEL(GripInspect), GpuApi::Vulkan);
+	Prepared cpu(OFXGRIP_KERNEL(GripInspect), GpuApi::None);
+	const RectI bounds{0, 0, 10, 6};
+	// Mode 8 fills with `fill`; only the window changes, in every destination layout.
+	ImageBuffer out = image(bounds, BitDepth::Float);
+	KernelDispatch d = gpu.dispatch(inspectValues(8));
+	d.destination = cpuImage(out);
+	d.accelerator = GpuApi::Vulkan;
+	d.window = {3, 2, 7, 5};
+	ASSERT_TRUE(KernelEngine::shared().run(d).ok());
+	EXPECT_FLOAT_EQ(at(out, 3, 2, 0), 0.125f);
+	EXPECT_FLOAT_EQ(at(out, 6, 4, 0), 0.125f);
+	EXPECT_FLOAT_EQ(at(out, 2, 2, 0), 0.0f);
+	EXPECT_FLOAT_EQ(at(out, 7, 2, 0), 0.0f);
+	EXPECT_FLOAT_EQ(at(out, 3, 5, 0), 0.0f);
+	ImageBuffer alpha = image({0, 0, 3, 3}, BitDepth::UInt8, Components::Alpha);
+	KernelDispatch one = gpu.dispatch(inspectValues(8));
+	one.destination = cpuImage(alpha);
+	one.accelerator = GpuApi::Vulkan;
+	ASSERT_TRUE(KernelEngine::shared().run(one).ok());
+	EXPECT_EQ(alpha.bytes()[0], 32);  // the fill's alpha, 0.125 × 255 rounded
+
+	VulkanKernelBackend backend;
+	KernelDispatch blockLayout = gpu.dispatch(inspectValues(0));
+	blockLayout.layout = &cpu.layout;
+	blockLayout.destination = cpuImage(out);
+	EXPECT_EQ(backend.dispatch(blockLayout).code(), ErrorCode::InvalidParameter);
+	KernelDispatch gpuDestination = gpu.dispatch(inspectValues(0));
+	gpuDestination.destination.connected = true;
+	gpuDestination.destination.gpu.api = GpuApi::Vulkan;
+	EXPECT_EQ(backend.dispatch(gpuDestination).code(), ErrorCode::InvalidParameter);
+	KernelDispatch noDestination = gpu.dispatch(inspectValues(0));
+	EXPECT_EQ(backend.dispatch(noDestination).code(), ErrorCode::InvalidParameter);
+	KernelDispatch gpuSource = gpu.dispatch(inspectValues(0));
+	gpuSource.destination = cpuImage(out);
+	KernelImage foreign;
+	foreign.connected = true;
+	foreign.gpu.api = GpuApi::Metal;
+	gpuSource.sources = {foreign};
+	EXPECT_EQ(backend.dispatch(gpuSource).code(), ErrorCode::InvalidParameter);
+	KernelDispatch emptyWindow = gpu.dispatch(inspectValues(0));
+	emptyWindow.destination = cpuImage(out);
+	emptyWindow.window = {20, 20, 30, 30};
+	EXPECT_TRUE(backend.dispatch(emptyWindow).ok());
+	KernelDispatch aborted = gpu.dispatch(inspectValues(0));
+	aborted.destination = cpuImage(out);
+	aborted.abort = []() { return true; };
+	EXPECT_TRUE(backend.dispatch(aborted).isCancellation());
+	// The engine refuses an implementation built for another API than the accelerator's.
+	KernelDispatch mismatched = cpu.dispatch(inspectValues(0));
+	mismatched.destination = cpuImage(out);
+	mismatched.accelerator = GpuApi::Vulkan;
+	EXPECT_EQ(KernelEngine::shared().run(mismatched).code(), ErrorCode::InvalidParameter);
 }
 
 #endif

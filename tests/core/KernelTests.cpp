@@ -127,6 +127,57 @@ TEST(KernelLayout, ReadsTheCppReflectionAsABlockLayout)
 	EXPECT_EQ(layout.uniformsLength(), 28u);
 }
 
+TEST(KernelLayout, ReadsTheSpirvReflectionAsADescriptorLayout)
+{
+	const KernelLayout layout = layoutOf("GripBlur.spirv.json");
+	EXPECT_EQ(layout.form(), KernelBindingForm::Descriptors);
+	EXPECT_EQ(layout.globalsLength(), 0u);
+	EXPECT_TRUE(layout.hasUniforms());
+	EXPECT_EQ(layout.uniformsIndex(), 0);
+	EXPECT_EQ(layout.uniformsLength(), 48u);
+	EXPECT_EQ(layout.members()[1].offset, 16u);
+	EXPECT_TRUE(layout.hasTile());
+	EXPECT_EQ(layout.tileIndex(), 1);
+	// Every resource shares one binding space, so a texture's map index is its position among
+	// the textures and its slot is the descriptor binding.
+	ASSERT_EQ(layout.textures().size(), 3u);
+	EXPECT_EQ(layout.textures()[0].name, "source");
+	EXPECT_EQ(layout.textures()[0].slotIndex, 2);
+	EXPECT_EQ(layout.textures()[0].mapIndex, 0u);
+	EXPECT_EQ(layout.textures()[1].slotIndex, 3);
+	EXPECT_EQ(layout.textures()[1].mapIndex, 1u);
+	EXPECT_EQ(layout.destination().slotIndex, 4);
+	EXPECT_EQ(layout.destination().mapIndex, 2u);
+	EXPECT_EQ(layout.textureCount(), 3u);
+	ASSERT_EQ(layout.samplers().size(), 1u);
+	EXPECT_EQ(layout.samplers()[0].slotIndex, 5);
+	ASSERT_EQ(layout.constants().size(), 2u);
+	EXPECT_EQ(layout.constants()[0].name, "TAPS");
+	EXPECT_EQ(layout.constants()[0].slotIndex, 0);
+	EXPECT_EQ(layout.constants()[1].name, "INVERT");
+	EXPECT_EQ(layout.constants()[1].slotIndex, 1);
+	EXPECT_EQ(layout.constants()[1].scalarType, KernelScalarType::Bool);
+
+	// The form holds whichever global comes first, and a descriptor layout binds no other kind.
+	const std::string entry = R"("entryPoints":[{"name":"k","stage":"compute","threadGroupSize":[8,8,1],"parameters":[]}])";
+	const std::string constant = R"({"name":"C","binding":{"kind":"specializationConstant","index":3},"type":{"kind":"scalar","scalarType":"int32"}})";
+	const std::string destination = R"({"name":"d","binding":{"kind":"descriptorTableSlot","index":7},"type":{"kind":"resource","baseShape":"texture2D","access":"readWrite"}})";
+	auto doc = [&](const std::string& params) { return "{\"version\":\"1.1\",\"parameters\":[" + params + "]," + entry + "}"; };
+	KernelLayout out;
+	ASSERT_TRUE(KernelLayout::parse(doc(constant + "," + destination), out).ok());
+	EXPECT_EQ(out.form(), KernelBindingForm::Descriptors);
+	EXPECT_EQ(out.constants()[0].slotIndex, 3);
+	EXPECT_EQ(out.destination().slotIndex, 7);
+	EXPECT_EQ(out.destination().mapIndex, 0u);
+	const std::string metalTexture = R"({"name":"t","binding":{"kind":"shaderResource","index":0},"type":{"kind":"resource","baseShape":"texture2D"}})";
+	EXPECT_EQ(KernelLayout::parse(doc(destination + "," + metalTexture), out).code(), ErrorCode::InvalidParameter);
+	const std::string unknown = R"({"name":"u","binding":{"kind":"descriptorTableSlot","index":1},"type":{"kind":"array"}})";
+	EXPECT_EQ(KernelLayout::parse(doc(destination + "," + unknown), out).code(), ErrorCode::InvalidParameter);
+	const std::string sampler = R"({"name":"s","binding":{"kind":"descriptorTableSlot","index":2},"type":{"kind":"samplerState"}})";
+	ASSERT_TRUE(KernelLayout::parse(doc(destination + "," + sampler), out).ok());
+	EXPECT_EQ(out.samplers()[0].slotIndex, 2);
+}
+
 TEST(KernelLayout, ReadsTheInspectKernelWithEveryScalarKind)
 {
 	const KernelLayout layout = layoutOf("GripInspect.metal.json");

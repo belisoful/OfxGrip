@@ -1,12 +1,24 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2026 Belisoful
 // The Spot bundle: a kernel effect whose parameters come from its Slang metadata block, rendered
-// on the CPU on every platform and on Metal on macOS with the same pixels.
+// on the CPU on every platform, on Metal on macOS, and on the Vulkan accelerator where a device
+// opens, with the same pixels.
 #include <ofxgrip/minihost/BundleLoader.hpp>
 #include <ofxgrip/minihost/MiniHost.hpp>
 
 #if defined(OFXGRIP_HAS_METAL)
 #include <ofxgrip/gpu/MetalBackend.hpp>
+#endif
+
+#if defined(OFXGRIP_HAS_VULKAN)
+#include <ofxgrip/gpu/VulkanBackend.hpp>
+
+#include "../TestEnvironment.hpp"
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #endif
 
 #include "ofxGPURender.h"
@@ -186,6 +198,104 @@ TEST_F(SpotBundle, MetalRenderMatchesTheCpuRender)
 			ASSERT_NEAR(at(reference.image, x, y, 0), at(tiles.image, x, y, 0), 0.002f) << x << "," << y;
 		}
 	}
+}
+
+#endif
+
+#if defined(OFXGRIP_HAS_VULKAN)
+
+namespace {
+
+std::string spotLog()
+{
+	const char* directory = std::getenv("OFXGRIP_LOG_DIR");
+	if (directory == nullptr) {
+		return {};
+	}
+	std::ifstream in(std::filesystem::path(directory) / "com.belisoful.ofxgrip.spot.log", std::ios::binary);
+	std::stringstream text;
+	text << in.rdbuf();
+	return text.str();
+}
+
+}  // namespace
+
+TEST_F(SpotBundle, VulkanAcceleratorMatchesTheCpuRender)
+{
+	if (!vulkan::VulkanContext::available()) {
+		GTEST_SKIP() << "No Vulkan device: " << vulkan::VulkanContext::unavailableReason();
+	}
+	if (std::getenv("OFXGRIP_LOG_DIR") == nullptr) {
+		GTEST_SKIP() << "The test reads the plug-in's log from OFXGRIP_LOG_DIR";
+	}
+	// The accelerator is chosen at the load action, so each pass loads the bundle afresh.
+	auto renderEveryDepth = [this](const char* accelerator) {
+		ofxgrip::testing::setTestEnv("OFXGRIP_KERNEL_ACCELERATOR", accelerator);
+		start();
+		ofxgrip::testing::unsetTestEnv("OFXGRIP_KERNEL_ACCELERATOR");
+		instance_->setParam("center", {10.0, 6.0});
+		instance_->setParam("radius", {5.0});
+		instance_->setParam("softness", {6.0});
+		instance_->setParam("outsideGain", {0.3});
+		instance_->setParam("tint", {1.0, 0.5, 0.25});
+		std::vector<ImageBuffer> frames;
+		for (BitDepth depth : {BitDepth::Float, BitDepth::Half, BitDepth::UInt8, BitDepth::UInt16}) {
+			instance_->setInput("Source", makeRampImage(32, 16, depth));
+			RenderRequest request;
+			request.depth = depth;
+			RenderResult whole = instance_->render(request);
+			EXPECT_TRUE(whole.ok()) << toString(depth);
+			EXPECT_EQ(whole.gpu, GpuApi::None);
+			frames.push_back(std::move(whole.image));
+			request.tileSize = 7;
+			request.threads = 3;
+			RenderResult tiled = instance_->render(request);
+			EXPECT_TRUE(tiled.ok()) << toString(depth);
+			frames.push_back(std::move(tiled.image));
+		}
+		instance_->setParam("INVERT", {1.0});
+		RenderResult inverted = instance_->render(RenderRequest{});
+		EXPECT_TRUE(inverted.ok());
+		frames.push_back(std::move(inverted.image));
+		instance_.reset();
+		host_->unload();
+		host_.reset();
+		return frames;
+	};
+	const std::vector<ImageBuffer> cpu = renderEveryDepth("none");
+	const std::size_t logged = spotLog().size();
+	const std::vector<ImageBuffer> accelerated = renderEveryDepth("vulkan");
+	ASSERT_EQ(cpu.size(), accelerated.size());
+	for (std::size_t i = 0; i < cpu.size(); ++i) {
+		ASSERT_EQ(cpu[i].desc(), accelerated[i].desc()) << "frame " << i;
+		const RectI& b = cpu[i].desc().bounds;
+		for (int y = b.y1; y < b.y2; ++y) {
+			for (int x = b.x1; x < b.x2; ++x) {
+				for (std::size_t c = 0; c < 4; ++c) {
+					ASSERT_NEAR(at(cpu[i], x, y, c), at(accelerated[i], x, y, c), 0.02f) << "frame " << i << " at " << x << "," << y << " channel " << c;
+				}
+			}
+		}
+	}
+	// A failed accelerated dispatch falls back and says so; the load says which backend runs.
+	const std::string log = spotLog().substr(logged);
+	EXPECT_NE(log.find("Kernels render CPU frames on vulkan"), std::string::npos) << log;
+	EXPECT_EQ(log.find("unavailable"), std::string::npos) << log;
+	EXPECT_EQ(log.find("falls back to the CPU backend"), std::string::npos) << log;
+}
+
+TEST_F(SpotBundle, AnUnknownAcceleratorNameIsReportedAndIgnored)
+{
+	if (std::getenv("OFXGRIP_LOG_DIR") == nullptr) {
+		GTEST_SKIP() << "The test reads the plug-in's log from OFXGRIP_LOG_DIR";
+	}
+	const std::size_t logged = spotLog().size();
+	ofxgrip::testing::setTestEnv("OFXGRIP_KERNEL_ACCELERATOR", "abacus");
+	start();
+	ofxgrip::testing::unsetTestEnv("OFXGRIP_KERNEL_ACCELERATOR");
+	instance_->setInput("Source", makeRampImage(32, 16, BitDepth::Float));
+	EXPECT_TRUE(instance_->render(RenderRequest{}).ok());
+	EXPECT_NE(spotLog().substr(logged).find("names no accelerator: abacus"), std::string::npos);
 }
 
 #endif

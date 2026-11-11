@@ -8,6 +8,9 @@
 #if defined(OFXGRIP_HAS_OPENCL)
 #include <ofxgrip/gpu/OpenCLWatermark.hpp>
 #endif
+#if defined(OFXGRIP_HAS_CUDA)
+#include <ofxgrip/gpu/CudaWatermark.hpp>
+#endif
 
 OFXGRIP_NAMESPACE_BEGIN
 
@@ -36,18 +39,24 @@ Error applyRenderWatermark(RenderContext& context, const WatermarkConfiguration&
 		mark.composite(context.output, window, frameSize, frameOrigin);
 		return Error::none();
 	}
-	switch (context.outputGpu.api) {
+	// A chain of tests and no switch: a build with neither backend would leave a switch with only
+	// a default label, which MSVC rejects at /W4.
 #if defined(OFXGRIP_HAS_METAL)
-	case GpuApi::Metal:
+	if (context.outputGpu.api == GpuApi::Metal) {
 		return metal::metalWatermark(context.outputGpu, window, frameSize, frameOrigin, mark);
+	}
 #endif
 #if defined(OFXGRIP_HAS_OPENCL)
-	case GpuApi::OpenCL:
+	if (context.outputGpu.api == GpuApi::OpenCL) {
 		return opencl::openCLWatermark(context.outputGpu, window, frameSize, frameOrigin, mark);
-#endif
-	default:
-		return Error::make(ErrorCode::Unsupported, "The watermark has no path for this GPU API").with("api", std::string(toString(context.outputGpu.api)));
 	}
+#endif
+#if defined(OFXGRIP_HAS_CUDA)
+	if (context.outputGpu.api == GpuApi::Cuda) {
+		return cuda::cudaWatermark(context.outputGpu, window, frameSize, frameOrigin, mark);
+	}
+#endif
+	return Error::make(ErrorCode::Unsupported, "The watermark has no path for this GPU API").with("api", std::string(toString(context.outputGpu.api)));
 }
 
 OFXGRIP_NAMESPACE_END

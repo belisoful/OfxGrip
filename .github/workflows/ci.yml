@@ -1,7 +1,8 @@
 name: CI
 
-# Runs the Full Check from AGENTS.md on macOS, and the build-and-test subset on Linux and Windows
-# (allowed to fail until phase 4 lands).
+# Runs the Full Check from AGENTS.md on macOS and the build-and-test subset on Linux, where the
+# Vulkan backend runs on Mesa's software driver and the OpenCL backend on pocl. The Windows job
+# may fail without blocking until a run confirms the MSVC build.
 
 on:
   push:
@@ -65,23 +66,33 @@ jobs:
         run: scripts/coverage.sh build/coverage
 
   linux:
-    name: Linux x86_64 (phase 4)
+    name: Linux x86_64
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libvulkan-dev mesa-vulkan-drivers ocl-icd-opencl-dev pocl-opencl-icd libgl-dev
       - name: Configure
         run: cmake --preset debug
       - name: Build
         run: cmake --build --preset debug
       - name: Test
         run: ctest --preset debug
+      - name: Validate bundles
+        run: python3 scripts/validate-bundle.py build/debug/plugins
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ctest-linux
+          path: build/debug/Testing
+          retention-days: 14
 
   windows:
-    name: Windows x64 (phase 4)
+    name: Windows x64
     runs-on: windows-2025
     timeout-minutes: 60
     continue-on-error: true

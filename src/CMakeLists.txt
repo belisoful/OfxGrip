@@ -50,7 +50,8 @@ add_library(ofxgrip_core STATIC
   core/Digest.cpp
   core/Watermark.cpp
   core/Licensing.cpp
-  core/LicensingProviders.cpp)
+  core/LicensingProviders.cpp
+  core/Inference.cpp)
 add_library(OfxGrip::core ALIAS ofxgrip_core)
 target_include_directories(ofxgrip_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(ofxgrip_core PUBLIC OfxGrip::options PRIVATE nlohmann_json::nlohmann_json)
@@ -119,6 +120,37 @@ if(OFXGRIP_OPENCL_FOUND)
 endif()
 set(OFXGRIP_OPENCL_FOUND ${OFXGRIP_OPENCL_FOUND} PARENT_SCOPE)
 
+# ---- ofxgrip_gpu_vulkan: the Vulkan kernel backend over OfxGrip's own device --------------------------
+# Only the Vulkan headers are needed to build: the loader is opened at run time, so a plug-in that
+# carries the backend still loads on a machine without Vulkan.
+
+option(OFXGRIP_VULKAN "Build the Vulkan kernel backend when the Vulkan headers are found" ON)
+if(OFXGRIP_VULKAN)
+  find_path(OFXGRIP_VULKAN_INCLUDE_DIR vulkan/vulkan_core.h
+    HINTS ENV VULKAN_SDK
+    PATH_SUFFIXES include Include)
+endif()
+if(OFXGRIP_VULKAN AND OFXGRIP_VULKAN_INCLUDE_DIR)
+  add_library(ofxgrip_gpu_vulkan STATIC gpu/VulkanBackend.cpp gpu/VulkanKernelBackend.cpp)
+  add_library(OfxGrip::gpu_vulkan ALIAS ofxgrip_gpu_vulkan)
+  target_link_libraries(ofxgrip_gpu_vulkan PUBLIC OfxGrip::core OfxGrip::kernels PRIVATE ${CMAKE_DL_LIBS})
+  target_include_directories(ofxgrip_gpu_vulkan SYSTEM PRIVATE "${OFXGRIP_VULKAN_INCLUDE_DIR}")
+  target_compile_definitions(ofxgrip_gpu_vulkan PUBLIC OFXGRIP_HAS_VULKAN=1)
+  message(STATUS "OfxGrip: Vulkan kernel backend (headers in ${OFXGRIP_VULKAN_INCLUDE_DIR})")
+else()
+  message(STATUS "OfxGrip: no Vulkan kernel backend (set OFXGRIP_VULKAN_INCLUDE_DIR or VULKAN_SDK to build it)")
+endif()
+
+# ---- ofxgrip_gpu_cuda: the CUDA kernel backend over the driver API ------------------------------------
+# No CUDA toolkit is needed to build: CudaDriver declares the driver's interface and opens the
+# driver library at run time. The library builds on every platform so the backend's tests run
+# against a fake driver; a plug-in links it only where a CUDA host exists.
+
+add_library(ofxgrip_gpu_cuda STATIC gpu/CudaDriver.cpp gpu/CudaKernelBackend.cpp gpu/CudaWatermark.cpp)
+add_library(OfxGrip::gpu_cuda ALIAS ofxgrip_gpu_cuda)
+target_link_libraries(ofxgrip_gpu_cuda PUBLIC OfxGrip::core OfxGrip::kernels PRIVATE ${CMAKE_DL_LIBS})
+target_compile_definitions(ofxgrip_gpu_cuda PUBLIC OFXGRIP_HAS_CUDA=1)
+
 # ---- ofxgrip: the OpenFX adapter ---------------------------------------------------------------
 
 add_library(ofxgrip_openfx_headers INTERFACE)
@@ -136,6 +168,7 @@ add_library(ofxgrip STATIC
   ofx/KernelEffect.cpp
   ofx/Interact.cpp
   ofx/RenderWatermark.cpp
+  ofx/InferenceEffect.cpp
   ofx/Plugin.cpp)
 add_library(OfxGrip::ofxgrip ALIAS ofxgrip)
 target_link_libraries(ofxgrip PUBLIC OfxGrip::core OfxGrip::openfx_headers OfxGrip::kernels)
@@ -146,6 +179,12 @@ if(TARGET ofxgrip_gpu_opencl)
   # The watermark reaches OpenCL frames through the backend; a plug-in without OpenCL frames pays
   # nothing beyond the link.
   target_link_libraries(ofxgrip PUBLIC OfxGrip::gpu_opencl)
+endif()
+if(TARGET ofxgrip_gpu_vulkan)
+  target_link_libraries(ofxgrip PUBLIC OfxGrip::gpu_vulkan)
+endif()
+if(NOT APPLE)
+  target_link_libraries(ofxgrip PUBLIC OfxGrip::gpu_cuda)
 endif()
 # The OpenGL overlay fallback compiles where the OpenGL headers exist; the draw suite needs none.
 if(APPLE)
@@ -158,6 +197,14 @@ else()
     target_compile_definitions(ofxgrip PRIVATE OFXGRIP_HAS_OPENGL=1)
   endif()
 endif()
+
+# ---- ofxgrip_inference: inference backends over engines opened at run time ---------------------------
+# The seam itself (Inference.hpp) is in core. A plug-in links this library when it runs models
+# through InferKit.
+
+add_library(ofxgrip_inference STATIC inference/InferKitBackend.cpp)
+add_library(OfxGrip::inference ALIAS ofxgrip_inference)
+target_link_libraries(ofxgrip_inference PUBLIC OfxGrip::core PRIVATE nlohmann_json::nlohmann_json ${CMAKE_DL_LIBS})
 
 # ---- ofxgrip_c: the C contract over the adapter ---------------------------------------------------
 

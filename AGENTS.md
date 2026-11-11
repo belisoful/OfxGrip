@@ -54,8 +54,16 @@ Code is commit-ready only when every check below passes.
 7. The debug build once with `-DOFXGRIP_BUILD_RUST=ON` (cargo build, `cargo test -p ofxgrip`, and
    the Rust bundle through the mini host), when the change touches the C contract or `rust/`
 
-Build and test are also run on Linux and Windows in CI once those platforms land (phase 4 in
-`Docs/Plan.md`); until then the Linux and Windows jobs may fail without blocking.
+CI also builds and tests on Linux (`ubuntu-24.04`, blocking) and on Windows (non-blocking until
+a run confirms the MSVC build; phase 4 in `Docs/Plan.md`). A change to platform code, a GPU
+backend, or the build files is also built and tested with GCC in the local Linux virtual machine
+before a commit:
+
+```bash
+limactl shell ofxgrip -- bash -lc 'cmake -S /Users/user/Code/EveryGrip/OfxGrip -B ~/b/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build ~/b/debug && cd ~/b/debug && ctest'
+```
+
+`Docs/Testing.md` describes the machine and the software Vulkan and OpenCL drivers in it.
 
 ### Live host
 
@@ -71,6 +79,10 @@ bundle there (a copy, never a symlink: Q-RESOLVE-025). Resolve caches descriptor
 - Apple's metal-cpp, vendored under `external/metal-cpp/` (Apache-2.0), for the Metal backend.
 - No host SDK beyond the headers. No Objective-C: Metal is reached through metal-cpp, and exactly
   one translation unit (`src/gpu/MetalCppImpl.cpp`) defines its private implementation.
+- Optional: the Vulkan headers on the build machine build the Vulkan backend
+  (`OFXGRIP_VULKAN_INCLUDE_DIR`, `VULKAN_SDK`, or a system package). The Vulkan loader, the CUDA
+  driver, and InferKit are opened at run time and are never linked. The CUDA backend declares
+  the driver's interface itself (`CudaDriver.hpp`) and includes no NVIDIA header.
 
 The reference repositories under `local/` are concept-only (D-001). Never copy, port, or closely
 paraphrase their code. The official OpenFX headers are a separate case.
@@ -83,11 +95,12 @@ paraphrase their code. The official OpenFX headers are a separate case.
   `MetaManager`, `Preset`, `Presets`, `FrameData`, `I18n`, `About`, `Debug`, `InstanceTracker`,
   `Regression`, the kernel contract (`KernelLayout`, `KernelMetadata`, `KernelTile`,
   `KernelValues`, `KernelCatalog`), the overlay model (`Overlay`), licensing (`Licensing`,
-  `LicensingProviders`, `Watermark`, `Digest`), and the framework extensions (`MetaExtension`,
+  `LicensingProviders`, `Watermark`, `Digest`), the inference seam (`Inference`), and the
+  framework extensions (`MetaExtension`,
   `VisibilityExtension`, `VersioningExtension`, `AnalysisExtension`). These are the GripTruck
   candidates.
 - `include/ofxgrip/ofx/` — the OpenFX adapter: `Suites`, `PropertySet`, `Actions`, `Descriptor`,
-  `Effect`, `KernelEffect`, `Interact`, `RenderWatermark`, `Analysis`, `Plugin`,
+  `Effect`, `KernelEffect`, `InferenceEffect`, `Interact`, `RenderWatermark`, `Analysis`, `Plugin`,
   `OfxHostServices`, `ResolveExtensions`.
 - `include/ofxgrip/c/ofxgrip_c.h`, `src/c/` — the C contract. It is additive: a point release adds
   functions and never changes or removes one.
@@ -95,24 +108,29 @@ paraphrase their code. The official OpenFX headers are a separate case.
   the libraries with the `cmake` crate), `ofxgrip` (the safe API), `examples/gain-rs`. CMake builds
   and packages it with `-DOFXGRIP_BUILD_RUST=ON`.
 - `include/ofxgrip/gpu/` — the GPU backends: `MetalBackend` and `MetalKernelBackend` (macOS),
-  `OpenCLBackend`, the kernel engine (`KernelEngine`, `CpuKernelBackend`, `KernelCpu`), and the
-  watermark blends (`MetalWatermark`, `OpenCLWatermark`). Opaque handles only; no Metal or
-  OpenCL header is included from a public header.
+  `OpenCLBackend`, `VulkanBackend` and `VulkanKernelBackend` (OfxGrip's own device, an
+  accelerator for CPU frames), `CudaDriver` and `CudaKernelBackend` (the driver API, resolved at
+  run time), the kernel engine (`KernelEngine`, `CpuKernelBackend`, `KernelCpu`), and the
+  watermarks (`MetalWatermark`, `OpenCLWatermark`, `CudaWatermark`). Opaque handles only; no
+  Metal, OpenCL, Vulkan, or CUDA header is included from a public header.
+- `include/ofxgrip/inference/` — `InferKitBackend`, the inference backend over InferKit's C
+  interface.
 - `kernels/` — `GripKernel.slang`, OfxGrip's copy of the D-009 kernel module.
 - `external/slang-prelude/` — the Slang C++ prelude the CPU backend compiles emitted kernels
   against (Apache-2.0 with LLVM exception).
-- `src/core/`, `src/ofx/`, `src/gpu/` — implementations, same split.
+- `src/core/`, `src/ofx/`, `src/gpu/`, `src/inference/` — implementations, same split.
 - `minihost/` — the headless OFX host (library and `ofxgrip-minihost` CLI).
 - `plugins/` — `HostDump` (probe), `Gain` (sample), and `Spot` (the Slang kernel sample with an
   overlay and a trial license), each built into an `.ofx.bundle`.
-- `tests/core/`, `tests/ofx/`, `tests/gpu/`, `tests/c/`, `tests/integration/` — GoogleTest. Test files mirror
+- `tests/core/`, `tests/ofx/`, `tests/gpu/`, `tests/inference/`, `tests/c/`, `tests/integration/` — GoogleTest. Test files mirror
   the header they cover: `ManifestTests.cpp` covers `Manifest.hpp`. `tests/core/FakeServices.hpp`
   holds the in-memory host services the host-free tests share.
 - `cmake/` — `OfxGripPlugin.cmake` (bundle layout, `Info.plist`), `OfxGripKernels.cmake`
   (`ofxgrip_add_kernels`: checked-in slangc outputs embedded through `KernelAdapter.cpp.in`),
   sanitizer and coverage helpers.
 - `scripts/` — `install-bundle.sh`, `validate-bundle.py`, `coverage.sh`, `ofxgrip-slang.sh`
-  (regenerates a kernel's Metal and C++ sources and reflection JSON with `slangc`).
+  (regenerates a kernel's Metal, C++, SPIR-V, and CUDA outputs and reflection JSON with
+  `slangc`, and the PTX with `nvcc`).
 - `Docs/` — `Plan.md`, `Architecture.md`, `Testing.md`.
 - `external/openfx/`, `external/metal-cpp/`, `external/slang-prelude/` — vendored headers and
   licenses.
@@ -124,12 +142,17 @@ Rules of the layering:
 - Effect code asks `HostProfile::has(Quirk)` for host behavior, never for a host name.
 - Every parameter read and write goes through `ParameterService`, so the API-traffic events fire.
 - Render reads only the `RenderSnapshot` and the images handed to it. It mutates no instance state.
-- A kernel's generated sources (`<name>.metal`, `<name>.cpp`, the `.json` layouts) are checked
-  in beside the `.slang`. Regenerate with `scripts/ofxgrip-slang.sh` (or configure with
+- A kernel's generated sources (`<name>.metal`, `<name>.cpp`, `<name>.spv`, `<name>.cu`, the
+  `.json` layouts, and `<name>.ptx` when an NVIDIA toolchain built it) are checked in beside the
+  `.slang`. Regenerate with `scripts/ofxgrip-slang.sh` (or configure with
   `-DOFXGRIP_SLANGC=<path>`) after editing a `.slang`; the build embeds the checked-in files
   and never requires `slangc`.
 - The licensing status an instance renders under comes from the snapshot's license state; the
-  watermark goes on after `render()` in the adapter, on CPU, Metal, and OpenCL frames.
+  watermark goes on after `render()` in the adapter, on CPU, Metal, OpenCL, and CUDA frames.
+- A GPU runtime that may be absent on a user's machine (the Vulkan loader, the CUDA driver,
+  InferKit) is opened at run time, never linked. Its absence makes the backend unavailable.
+- A model runs on an `InferenceRunner` thread. The render thread waits, polls the host's abort,
+  and reads the instance's `InferenceCache`.
 - A Metal render encodes on the host's queue and commits without waiting. The only process-wide
   state on a render path is the backend's cache of immutable pipelines and reusable scratch
   buffers, under a mutex.
@@ -148,8 +171,8 @@ Rules of the layering:
   maps to an `OfxStatus`. Unknown actions answer `kOfxStatReplyDefault`.
 - Errors are `Error` values with a code, a user message, a developer message, and context tags.
   Cancellation is a separate outcome, never an error.
-- No process-wide mutable globals on render paths, apart from the GPU backend's pipeline and
-  scratch cache. No environment variables at render time.
+- No process-wide mutable globals on render paths, apart from the GPU backends' pipeline, module,
+  and scratch caches. No environment variables at render time.
 - Document the introducing version on new public types and functions.
 - **Backward compatibility** — point releases stay backward compatible. Minor releases may break
   before 1.0, but minimize the breaks.
@@ -183,8 +206,8 @@ Prefer subject–verb–object declaratives and bullet lists of `condition → r
 
 ## Adding New Source Files
 
-1. Add the header under `include/ofxgrip/core/` or `include/ofxgrip/ofx/` and the source under the
-   matching `src/` folder. Add both to the target's source list in `CMakeLists.txt`.
+1. Add the header under `include/ofxgrip/core/`, `ofx/`, `gpu/`, or `inference/` and the source
+   under the matching `src/` folder. Add both to the target's source list in `src/CMakeLists.txt`.
 2. Add a test file under the matching `tests/` folder and to `tests/CMakeLists.txt`.
 3. A `core/` header includes only standard headers and other `core/` headers.
 

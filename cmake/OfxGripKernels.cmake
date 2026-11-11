@@ -3,17 +3,22 @@
 #   ofxgrip_add_kernels(TARGET <target> KERNELS <kernel>.slang ... [ENTRY <name>])
 #
 # For each <kernel>.slang the function expects, beside it, the files scripts/ofxgrip-slang.sh
-# emits: <kernel>.metal, <kernel>.metal.json, <kernel>.cpp, and <kernel>.cpp.json. They are checked
+# emits: <kernel>.metal, <kernel>.metal.json, <kernel>.cpp, and <kernel>.cpp.json. The optional
+# builds are embedded when their files exist: <kernel>.spv with <kernel>.spirv.json for the Vulkan
+# backend, and <kernel>.ptx with <kernel>.cuda.json for the CUDA backend. The files are checked
 # in, so a build without slangc uses them. When OFXGRIP_SLANGC names a slangc executable, a custom
-# command regenerates them whenever the Slang source or the GripKernel module is newer.
+# command regenerates the Metal, C++, SPIR-V, and CUDA outputs whenever the Slang source or the
+# GripKernel module is newer. When OFXGRIP_NVCC also names NVIDIA's nvcc, the same command
+# compiles the emitted <kernel>.cu to <kernel>.ptx; no other tool produces the PTX.
 #
 # The function generates one adapter translation unit per kernel (cmake/KernelAdapter.cpp.in) that
 # compiles the emitted C++ against the vendored Slang prelude, defines the CPU entry, and embeds
-# the four files as byte arrays. The plug-in names the kernel with OFXGRIP_KERNEL(<kernel>) and
+# the files as byte arrays. The plug-in names the kernel with OFXGRIP_KERNEL(<kernel>) and
 # registers kernelRecordFor(...) with its catalog. The kernel files are also copied into the
 # bundle's Contents/Resources/Kernels/ when the target is a plug-in built by ofxgrip_add_plugin.
 
 set(OFXGRIP_SLANGC "" CACHE FILEPATH "The slangc executable; empty uses the checked-in kernel outputs")
+set(OFXGRIP_NVCC "" CACHE FILEPATH "NVIDIA's nvcc, which compiles a kernel's emitted CUDA source to PTX; empty uses a checked-in .ptx when one exists")
 
 function(_ofxgrip_file_bytes path out_var)
   if(EXISTS "${path}")
@@ -50,12 +55,21 @@ function(ofxgrip_add_kernels)
     set(_metal_json "${_kernel_dir}/${_name}.metal.json")
     set(_cpp "${_kernel_dir}/${_name}.cpp")
     set(_cpp_json "${_kernel_dir}/${_name}.cpp.json")
+    set(_spirv "${_kernel_dir}/${_name}.spv")
+    set(_spirv_json "${_kernel_dir}/${_name}.spirv.json")
+    set(_cuda "${_kernel_dir}/${_name}.cu")
+    set(_cuda_json "${_kernel_dir}/${_name}.cuda.json")
+    set(_ptx "${_kernel_dir}/${_name}.ptx")
 
     if(OFXGRIP_SLANGC)
+      set(_outputs "${_metal}" "${_metal_json}" "${_cpp}" "${_cpp_json}" "${_spirv}" "${_spirv_json}" "${_cuda}" "${_cuda_json}")
+      if(OFXGRIP_NVCC)
+        list(APPEND _outputs "${_ptx}")
+      endif()
       add_custom_command(
-        OUTPUT "${_metal}" "${_metal_json}" "${_cpp}" "${_cpp_json}"
-        COMMAND "${CMAKE_COMMAND}" -E env "OFXGRIP_SLANGC=${OFXGRIP_SLANGC}" "OFXGRIP_KERNEL_MODULE_DIR=${_module_dir}"
-                bash "${PROJECT_SOURCE_DIR}/scripts/ofxgrip-slang.sh" --entry "${OGK_ENTRY}" --targets metal,cpp "${_kernel_abs}"
+        OUTPUT ${_outputs}
+        COMMAND "${CMAKE_COMMAND}" -E env "OFXGRIP_SLANGC=${OFXGRIP_SLANGC}" "OFXGRIP_NVCC=${OFXGRIP_NVCC}" "OFXGRIP_KERNEL_MODULE_DIR=${_module_dir}"
+                bash "${PROJECT_SOURCE_DIR}/scripts/ofxgrip-slang.sh" --entry "${OGK_ENTRY}" --targets metal,cpp,spirv,cuda "${_kernel_abs}"
         DEPENDS "${_kernel_abs}" "${_module_dir}/GripKernel.slang" "${PROJECT_SOURCE_DIR}/scripts/ofxgrip-slang.sh"
         COMMENT "slangc ${_name}.slang"
         VERBATIM)
@@ -67,7 +81,7 @@ function(ofxgrip_add_kernels)
     endforeach()
 
     # The adapter embeds the files at configure time; a regenerated file reconfigures.
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_kernel_abs}" "${_metal}" "${_metal_json}" "${_cpp_json}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_kernel_abs}" "${_metal}" "${_metal_json}" "${_cpp_json}" "${_spirv}" "${_spirv_json}" "${_ptx}" "${_cuda_json}")
     set(OFXGRIP_KERNEL_NAME "${_name}")
     set(OFXGRIP_KERNEL_ENTRY "${OGK_ENTRY}")
     set(OFXGRIP_KERNEL_CPP "${_cpp}")
@@ -75,6 +89,19 @@ function(ofxgrip_add_kernels)
     _ofxgrip_file_bytes("${_metal}" OFXGRIP_KERNEL_METAL_BYTES)
     _ofxgrip_file_bytes("${_metal_json}" OFXGRIP_KERNEL_METAL_JSON_BYTES)
     _ofxgrip_file_bytes("${_cpp_json}" OFXGRIP_KERNEL_CPP_JSON_BYTES)
+    # A build is embedded only with its layout: a module without one cannot be bound.
+    set(OFXGRIP_KERNEL_SPIRV_BYTES "0")
+    set(OFXGRIP_KERNEL_SPIRV_JSON_BYTES "0")
+    if(EXISTS "${_spirv}" AND EXISTS "${_spirv_json}")
+      _ofxgrip_file_bytes("${_spirv}" OFXGRIP_KERNEL_SPIRV_BYTES)
+      _ofxgrip_file_bytes("${_spirv_json}" OFXGRIP_KERNEL_SPIRV_JSON_BYTES)
+    endif()
+    set(OFXGRIP_KERNEL_PTX_BYTES "0")
+    set(OFXGRIP_KERNEL_CUDA_JSON_BYTES "0")
+    if(EXISTS "${_ptx}" AND EXISTS "${_cuda_json}")
+      _ofxgrip_file_bytes("${_ptx}" OFXGRIP_KERNEL_PTX_BYTES)
+      _ofxgrip_file_bytes("${_cuda_json}" OFXGRIP_KERNEL_CUDA_JSON_BYTES)
+    endif()
     set(_adapter "${CMAKE_CURRENT_BINARY_DIR}/${OGK_TARGET}_kernel_${_name}.cpp")
     configure_file("${PROJECT_SOURCE_DIR}/cmake/KernelAdapter.cpp.in" "${_adapter}" @ONLY)
     target_sources(${OGK_TARGET} PRIVATE "${_adapter}")
@@ -88,10 +115,19 @@ function(ofxgrip_add_kernels)
     target_link_libraries(${OGK_TARGET} PRIVATE OfxGrip::kernels)
 
     if(_bundle_dir)
+      set(_optional_resources)
+      if(EXISTS "${_spirv}" AND EXISTS "${_spirv_json}")
+        list(APPEND _optional_resources "${_spirv}" "${_spirv_json}")
+      endif()
+      if(EXISTS "${_ptx}" AND EXISTS "${_cuda_json}")
+        list(APPEND _optional_resources "${_ptx}" "${_cuda_json}")
+      endif()
       set(_resources "${_bundle_dir}/Contents/Resources/Kernels")
-      add_custom_command(TARGET ${OGK_TARGET} POST_BUILD
+      # PRE_LINK, so the files are in the bundle before ofxgrip_add_plugin's POST_BUILD step seals
+      # it with codesign; a resource copied in after signing breaks the seal.
+      add_custom_command(TARGET ${OGK_TARGET} PRE_LINK
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_resources}"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_kernel_abs}" "${_metal}" "${_metal_json}" "${_cpp_json}" "${_resources}/"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_kernel_abs}" "${_metal}" "${_metal_json}" "${_cpp_json}" ${_optional_resources} "${_resources}/"
         COMMENT "Bundling kernel ${_name}"
         VERBATIM)
     endif()

@@ -4,6 +4,8 @@
 
 #include <ofxgrip/core/KernelTile.hpp>
 
+#include "KernelPixels.hpp"
+
 #include <slang-cpp-prelude.h>
 
 #include <algorithm>
@@ -19,6 +21,14 @@ OFXGRIP_NAMESPACE_BEGIN
 namespace {
 
 using Float4 = Vector<float, 4>;
+
+// The prelude declares ITexture and IRWTexture with virtual functions and no virtual destructor.
+// The two views below live on the stack and are never deleted through a base pointer, so the
+// warning GCC raises on such a base is silenced for them alone.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+#endif
 
 /*! Reads a CPU view as a texture: bilinear clamp-to-edge sampling with normalized coordinates,
     row 0 at the bottom (the OpenFX orientation, `kGripTileRowsAscend`). A disconnected image
@@ -68,22 +78,8 @@ public:
 private:
 	Float4 fetch(int x, int y) const noexcept
 	{
-		const std::uint8_t* pixel = view_->pixel(x, y);
-		if (pixel == nullptr) {
-			return Float4{0.0f, 0.0f, 0.0f, 0.0f};
-		}
-		const BitDepth depth = view_->desc.depth;
-		switch (view_->desc.components) {
-		case Components::RGBA:
-			return Float4{readComponent(pixel, depth, 0), readComponent(pixel, depth, 1), readComponent(pixel, depth, 2), readComponent(pixel, depth, 3)};
-		case Components::RGB:
-			return Float4{readComponent(pixel, depth, 0), readComponent(pixel, depth, 1), readComponent(pixel, depth, 2), 1.0f};
-		case Components::Alpha:
-			return Float4{readComponent(pixel, depth, 0), 0.0f, 0.0f, 1.0f};
-		case Components::None:
-			break;
-		}
-		return Float4{0.0f, 0.0f, 0.0f, 0.0f};
+		const std::array<float, 4> texel = kernelTexel(*view_, x, y);
+		return Float4{texel[0], texel[1], texel[2], texel[3]};
 	}
 
 	Float4 sample(float u, float v) const noexcept
@@ -165,24 +161,15 @@ private:
 	Float4 overflow_{};
 };
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 struct VaryingInput {
 	uint32_t startGroup[3];
 	uint32_t endGroup[3];
 };
 static_assert(sizeof(VaryingInput) == sizeof(ComputeVaryingInput), "The varying input must match the prelude's layout");
-
-void writeTexel(const ImageView& out, int x, int y, const Float4& texel) noexcept
-{
-	std::uint8_t* pixel = out.pixel(x, y);
-	if (pixel == nullptr) {
-		return;
-	}
-	const std::size_t n = componentCount(out.desc.components);
-	for (std::size_t c = 0; c < n; ++c) {
-		const float value = out.desc.components == Components::Alpha ? texel[3] : texel[c];
-		writeComponent(pixel, out.desc.depth, c, value);
-	}
-}
 
 }  // namespace
 
@@ -294,7 +281,9 @@ Error CpuKernelBackend::dispatch(const KernelDispatch& d)
 	// The float tile converts into the destination's depth.
 	for (int y = window.y1; y < window.y2; ++y) {
 		for (int x = window.x1; x < window.x2; ++x) {
-			writeTexel(out, x, y, tile.at(static_cast<unsigned>(x - window.x1), static_cast<unsigned>(y - window.y1)));
+			const Float4& texel = tile.at(static_cast<unsigned>(x - window.x1), static_cast<unsigned>(y - window.y1));
+			const float rgba[4] = {texel[0], texel[1], texel[2], texel[3]};
+			writeKernelTexel(out, x, y, rgba);
 		}
 	}
 	return Error::none();

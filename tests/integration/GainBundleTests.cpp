@@ -234,7 +234,7 @@ TEST(HostDumpBundle, LoadsDescribesAndPassesThrough)
 
 // ---- Metal frames (macOS) -----------------------------------------------------------------------
 
-#if defined(OFXGRIP_HAS_METAL)
+#if defined(OFXGRIP_HAS_METAL) || defined(OFXGRIP_HAS_OPENCL)
 
 namespace {
 
@@ -264,6 +264,10 @@ void expectSameImage(const ImageBuffer& cpu, const ImageBuffer& gpu, BitDepth de
 }
 
 }  // namespace
+
+#endif
+
+#if defined(OFXGRIP_HAS_METAL)
 
 TEST_F(GainBundle, MetalRenderMatchesTheCpuRenderAcrossDepthsAndTiles)
 {

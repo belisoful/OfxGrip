@@ -240,8 +240,21 @@ private:
 		if (parameters == nullptr) {
 			return malformed("the JSON has no \"parameters\" array");
 		}
-		// The binding form is decided by the first global: every global of a C++ or CUDA layout
-		// binds by uniform offset, every global of a Metal layout by a kind and slot.
+		// The binding form holds for every global: a C++ or CUDA layout binds by uniform offset, a
+		// SPIR-V layout by one descriptor index space, a Metal layout by a kind and a slot.
+		out_.form_ = KernelBindingForm::Slots;
+		for (const Json& parameter : *parameters) {
+			const Json* binding = objectOf(parameter, "binding");
+			const std::string kind = binding == nullptr ? std::string() : stringOf(*binding, "kind");
+			if (kind == kKindUniform) {
+				out_.form_ = KernelBindingForm::Block;
+				break;
+			}
+			if (kind == kKindDescriptorTableSlot) {
+				out_.form_ = KernelBindingForm::Descriptors;
+				break;
+			}
+		}
 		std::size_t position = 0;
 		for (const Json& parameter : *parameters) {
 			const std::string name = stringOf(parameter, "name");
@@ -249,9 +262,6 @@ private:
 			const std::string kind = binding == nullptr ? std::string() : stringOf(*binding, "kind");
 			if (name.empty() || kind.empty()) {
 				return invalid("the global at position " + std::to_string(position) + " has no name and binding kind");
-			}
-			if (position == 0) {
-				out_.form_ = kind == kKindUniform ? KernelBindingForm::Block : KernelBindingForm::Slots;
 			}
 			std::size_t index = 0;
 			std::size_t offset = 0;
@@ -293,10 +303,30 @@ private:
 			}
 			return invalid("the global \"" + name + "\" has the type kind \"" + typeKind + "\", which the contract does not bind");
 		}
+		if (out_.form_ == KernelBindingForm::Descriptors) {
+			// Every resource shares the descriptor index space, so the type names the role.
+			if (kind == kKindSpecializationConstant) {
+				return addConstant(name, index, offset, type);
+			}
+			if (kind != kKindDescriptorTableSlot) {
+				return invalid("the global \"" + name + "\" has the binding kind \"" + kind + "\" on a descriptor layout");
+			}
+			if (typeKind == kKindConstantBuffer) {
+				return addConstantBuffer(name, index, offset, type);
+			}
+			if (typeKind == kKindResource) {
+				return addTexture(name, index, offset, type);
+			}
+			if (typeKind == kKindSamplerState) {
+				out_.samplers_.push_back(KernelSampler{name, index, 0});
+				return Error::none();
+			}
+			return invalid("the global \"" + name + "\" has the type kind \"" + typeKind + "\", which the contract does not bind");
+		}
 		if (kind == kKindConstantBuffer) {
 			return addConstantBuffer(name, index, offset, type);
 		}
-		if (kind == kKindShaderResource || kind == kKindDescriptorTableSlot) {
+		if (kind == kKindShaderResource) {
 			return addTexture(name, index, offset, type);
 		}
 		if (kind == kKindSamplerState) {
@@ -377,7 +407,7 @@ private:
 		}
 		KernelTexture texture;
 		texture.name = name;
-		texture.mapIndex = out_.form_ == KernelBindingForm::Block ? static_cast<unsigned>(out_.textures_.size()) : static_cast<unsigned>(index);
+		texture.mapIndex = out_.form_ == KernelBindingForm::Slots ? static_cast<unsigned>(index) : static_cast<unsigned>(out_.textures_.size());
 		texture.slotIndex = out_.form_ == KernelBindingForm::Block ? kKernelNoIndex : index;
 		texture.blockOffset = offset;
 		if (access == kAccessReadWrite) {

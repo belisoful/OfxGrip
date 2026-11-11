@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 using namespace ofxgrip;
 using namespace ofxgrip::minihost;
 
@@ -115,7 +117,7 @@ protected:
 	{
 		std::size_t n = 0;
 		for (const DrawCall& call : calls) {
-			n += call.op == op ? 1 : 0;
+			n += call.op == op ? 1u : 0u;
 		}
 		return n;
 	}

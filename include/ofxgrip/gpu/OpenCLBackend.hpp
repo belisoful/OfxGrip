@@ -92,8 +92,9 @@ public:
 	/*! The context for a host's `cl_command_queue`. One per queue for the process lifetime; null
 	    for a null queue. */
 	static std::shared_ptr<OpenCLContext> forQueue(void* commandQueue);
-	/*! A context over the first GPU device and a queue the backend owns, for hosts and tests.
-	    One per process. Null without a device. */
+	/*! A context over the first GPU device, or the first CPU device when no GPU has an OpenCL
+	    driver, and a queue the backend owns, for hosts and tests. One per process. Null without
+	    a device. */
 	static std::shared_ptr<OpenCLContext> systemDefault();
 
 	void* queue() const noexcept;

@@ -18,6 +18,8 @@
 # build lands in Win-arm64 with a warning. OFXGRIP_WINDOWS_ARCH_DIR overrides the Windows choice,
 # for example Win-arm64x for a binary linked as ARM64X.
 set(OFXGRIP_WINDOWS_ARCH_DIR "" CACHE STRING "The Windows architecture folder of built bundles; empty derives it from the target")
+option(OFXGRIP_STATIC_CXX_RUNTIME "On Linux, link libstdc++ and libgcc into each plug-in, so the bundle loads on a distribution older than the build machine's compiler" ON)
+set(OFXGRIP_AUTHENTICODE_COMMAND "" CACHE STRING "On Windows, a command that signs a binary, run with the built .ofx as its last argument (for example: signtool sign /fd SHA256 /a /tr <url> /td SHA256); empty leaves it unsigned")
 
 function(ofxgrip_bundle_arch_dir out_var)
   if(APPLE)
@@ -87,12 +89,30 @@ function(ofxgrip_add_plugin)
     endif()
   endif()
 
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND OFXGRIP_STATIC_CXX_RUNTIME AND NOT OFXGRIP_SANITIZER)
+    # A host ships its own libstdc++, often older than the build machine's. The plug-in exports
+    # two C functions, so its C++ runtime stays private. The C library still sets the oldest
+    # distribution a bundle loads on: build on the oldest one to support.
+    target_link_options(${_target} PRIVATE -static-libstdc++ -static-libgcc)
+  endif()
+
+  if(WIN32 AND OFXGRIP_AUTHENTICODE_COMMAND)
+    separate_arguments(_ofxgrip_sign_command NATIVE_COMMAND "${OFXGRIP_AUTHENTICODE_COMMAND}")
+    add_custom_command(TARGET ${_target} POST_BUILD
+      COMMAND ${_ofxgrip_sign_command} "$<TARGET_FILE:${_target}>"
+      COMMENT "Signing ${OGP_NAME}.ofx"
+      VERBATIM)
+  endif()
+
   if(APPLE)
     set(OFXGRIP_PLUGIN_NAME "${OGP_NAME}")
     set(OFXGRIP_PLUGIN_IDENTIFIER "${OGP_IDENTIFIER}")
     set(OFXGRIP_PLUGIN_VERSION "${PROJECT_VERSION}")
     set(OFXGRIP_PLUGIN_MIN_OS "${CMAKE_OSX_DEPLOYMENT_TARGET}")
     configure_file("${PROJECT_SOURCE_DIR}/cmake/Info.plist.in" "${_bundle_dir}/Contents/Info.plist" @ONLY)
+    # The signature seals the Info.plist. A configure that rewrites it (a version change) must
+    # relink, so the POST_BUILD step below signs the bundle again.
+    set_property(TARGET ${_target} APPEND PROPERTY LINK_DEPENDS "${_bundle_dir}/Contents/Info.plist")
   endif()
 
   if(APPLE)

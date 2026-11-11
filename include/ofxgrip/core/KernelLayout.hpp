@@ -9,8 +9,9 @@
 	kernel to, the source names, binding indexes, byte offsets, scalar types, and texture access of
 	every global the kernel declares. The emitted names are mangled, so the framework binds from
 	the JSON and never from a backend's own reflection. This is FxGrip's `FxGripKernelLayout` with
-	one addition: the C++ and CUDA targets bind every global by an offset into one globals block
-	instead of by slot index, and the layout reads both forms.
+	two additions. The C++ and CUDA targets bind every global by an offset into one globals block.
+	The SPIR-V target binds every resource by a binding in descriptor set 0 and each constant by
+	its specialization ID. The layout reads all three forms.
 
 	The contract a layout validates:
 
@@ -72,11 +73,13 @@ enum class KernelTextureAccess : std::uint8_t {
 	ReadWrite,
 };
 
-/*! How a layout binds its globals: by slot index per kind (Metal, SPIR-V) or by byte offset into
-    one globals block (C++, CUDA). */
+/*! How a layout binds its globals: by slot index per kind (Metal), by byte offset into one
+    globals block (C++, CUDA), or by one descriptor index space every kind shares (SPIR-V).
+    `Descriptors` was introduced in OfxGrip 0.5.0. */
 enum class KernelBindingForm : std::uint8_t {
 	Slots = 0,
 	Block,
+	Descriptors,
 };
 
 /*! One member of the kernel's uniforms struct. A member whose name matches a parameter's key
@@ -90,8 +93,9 @@ struct KernelMember {
 };
 
 /*! One texture global. `mapIndex` selects its coordinate map in `GripTile`: the slot index on a
-    slot layout, which slangc assigns in declaration order, and the declaration position on a
-    block layout. */
+    slot layout, which slangc assigns in declaration order, and the declaration position among
+    the textures on a block or descriptor layout. `slotIndex` is the descriptor binding on a
+    descriptor layout. */
 struct KernelTexture {
 	std::string name;
 	unsigned mapIndex{0};

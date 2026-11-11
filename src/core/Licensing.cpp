@@ -112,7 +112,9 @@ std::string formatIso8601(std::int64_t seconds)
 	unsigned m = 0;
 	unsigned d = 0;
 	civilFromDays(days, y, m, d);
-	char buffer[32];
+	// Sized for the widest value every field's type can print, which is what GCC's
+	// -Wformat-truncation checks against.
+	char buffer[128];
 	std::snprintf(buffer, sizeof buffer, "%04lld-%02u-%02uT%02lld:%02lld:%02lldZ", static_cast<long long>(y), m, d, static_cast<long long>(rest / 3600), static_cast<long long>(rest % 3600 / 60), static_cast<long long>(rest % 60));
 	return buffer;
 }

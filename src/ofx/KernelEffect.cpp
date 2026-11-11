@@ -6,6 +6,14 @@
 #include <ofxgrip/gpu/MetalKernelBackend.hpp>
 #endif
 
+#if defined(OFXGRIP_HAS_VULKAN)
+#include <ofxgrip/gpu/VulkanKernelBackend.hpp>
+#endif
+#if defined(OFXGRIP_HAS_CUDA)
+#include <ofxgrip/gpu/CudaKernelBackend.hpp>
+#endif
+
+#include <cstdlib>
 #include <set>
 
 OFXGRIP_NAMESPACE_BEGIN
@@ -14,6 +22,12 @@ void registerKernelBackends()
 {
 #if defined(OFXGRIP_HAS_METAL)
 	MetalKernelBackend::registerWithEngine();
+#endif
+#if defined(OFXGRIP_HAS_VULKAN)
+	VulkanKernelBackend::registerWithEngine();
+#endif
+#if defined(OFXGRIP_HAS_CUDA)
+	CudaKernelBackend::registerWithEngine();
 #endif
 }
 
@@ -145,6 +159,17 @@ Error KernelEffect::dispatchKernel(RenderContext& context, std::string_view name
 		return Error::make(ErrorCode::NotFound, "The effect has no such kernel").with("kernel", std::string(name));
 	}
 	const GpuApi api = context.outputIsGpu() ? context.outputGpu.api : GpuApi::None;
+	if (api == GpuApi::None && cpuAccelerator_ != GpuApi::None) {
+		const CompiledKernel::Build* accelerated = kernel->build(cpuAccelerator_);
+		KernelBackend* backend = KernelEngine::shared().backend(cpuAccelerator_);
+		if (accelerated != nullptr && !accelerated->error && backend != nullptr && backend->available()) {
+			const Error e = dispatchBuild(context, *kernel, *accelerated, cpuAccelerator_, values);
+			if (e.ok() || e.code() == ErrorCode::Cancelled) {
+				return e;
+			}
+			services().log().warning("Kernel " + kernel->record.name + " falls back to the CPU backend: " + e.describe());
+		}
+	}
 	const CompiledKernel::Build* build = kernel->build(api);
 	if (build == nullptr) {
 		return Error::make(ErrorCode::Unsupported, "The kernel has no build for this API").with("kernel", std::string(name)).with("api", std::string(toString(api)));
@@ -152,6 +177,13 @@ Error KernelEffect::dispatchKernel(RenderContext& context, std::string_view name
 	if (build->error) {
 		return build->error;
 	}
+	return dispatchBuild(context, *kernel, *build, GpuApi::None, values);
+}
+
+Error KernelEffect::dispatchBuild(RenderContext& context, const CompiledKernel& compiled, const CompiledKernel::Build& built, GpuApi accelerator, const KernelValueMap* values)
+{
+	const CompiledKernel* kernel = &compiled;
+	const CompiledKernel::Build* build = &built;
 	const KernelValueMap& valueMap = values != nullptr ? *values : context.snapshot.values();
 	const double pixelScale = context.args.renderScale.x > 0.0 ? context.args.renderScale.x : 1.0;
 	KernelDispatch dispatch;
@@ -164,6 +196,7 @@ Error KernelEffect::dispatchKernel(RenderContext& context, std::string_view name
 	dispatch.window = context.args.renderWindow;
 	dispatch.pixelScale = context.args.renderScale;
 	dispatch.destination.connected = true;
+	dispatch.accelerator = accelerator;
 	if (context.outputIsGpu()) {
 		dispatch.destination.gpu = context.outputGpu;
 	} else {
@@ -236,6 +269,22 @@ KernelEffectFactory::KernelEffectFactory(EffectManifest base, std::vector<Kernel
 
 void KernelEffectFactory::onLoad(const HostProfile&, LogService& log)
 {
+	if (const char* named = std::getenv("OFXGRIP_KERNEL_ACCELERATOR"); named != nullptr) {
+		const std::string_view choice(named);
+		if (choice == "vulkan") {
+			cpuAccelerator_ = GpuApi::Vulkan;
+		} else if (choice == "none") {
+			cpuAccelerator_ = GpuApi::None;
+		} else if (!choice.empty()) {
+			log.warning("OFXGRIP_KERNEL_ACCELERATOR names no accelerator: " + std::string(choice));
+		}
+	}
+	if (cpuAccelerator_ != GpuApi::None) {
+		// Asking opens the accelerator's device here, at load, and never inside the first render.
+		KernelBackend* backend = KernelEngine::shared().backend(cpuAccelerator_);
+		const bool ready = backend != nullptr && backend->available();
+		log.info("Kernels render CPU frames on " + std::string(toString(cpuAccelerator_)) + (ready ? "" : ": unavailable, the CPU backend renders them"));
+	}
 	if (error_) {
 		log.error("The kernel effect's manifest is invalid: " + error_.describe());
 	}
@@ -252,6 +301,7 @@ std::unique_ptr<Effect> KernelEffectFactory::finish(std::unique_ptr<KernelEffect
 {
 	if (effect) {
 		effect->setKernels(&kernels_);
+		effect->setCpuAccelerator(cpuAccelerator_);
 	}
 	return effect;
 }

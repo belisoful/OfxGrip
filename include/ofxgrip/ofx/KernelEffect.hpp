@@ -79,9 +79,15 @@ public:
 	const KernelSet* kernels() const noexcept { return kernels_; }
 	/*! Set by the factory before the instance attaches. */
 	void setKernels(const KernelSet* kernels) noexcept { kernels_ = kernels; }
+	/*! The backend that runs the kernels when the host renders CPU frames; `None` is the CPU
+	    backend. Set by the factory before the instance attaches. Introduced in OfxGrip 0.5.0. */
+	GpuApi cpuAccelerator() const noexcept { return cpuAccelerator_; }
+	void setCpuAccelerator(GpuApi api) noexcept { cpuAccelerator_ = api; }
 
 private:
+	Error dispatchBuild(RenderContext& context, const CompiledKernel& kernel, const CompiledKernel::Build& build, GpuApi accelerator, const KernelValueMap* values);
 	const KernelSet* kernels_{nullptr};
+	GpuApi cpuAccelerator_{GpuApi::None};
 };
 
 /*! The factory: builds the manifest from a base and the kernels, and creates instances. */
@@ -94,6 +100,14 @@ public:
 	/*! The manifest assembly's failure, if any. Describe reports it. */
 	const Error& error() const noexcept { return error_; }
 	const KernelSet& kernels() const noexcept { return kernels_; }
+	/*! Names the backend that runs the kernels when the host renders CPU frames. `Vulkan`
+	    uploads the frames to OfxGrip's own Vulkan device, and runs when the kernel has a SPIR-V
+	    build and a device opens; the CPU backend runs otherwise, and after a failed accelerated
+	    dispatch. The default is `None`. The environment variable `OFXGRIP_KERNEL_ACCELERATOR`
+	    (`vulkan` or `none`), read at the load action, overrides the setting. Introduced in
+	    OfxGrip 0.5.0. */
+	void setCpuAccelerator(GpuApi api) noexcept { cpuAccelerator_ = api; }
+	GpuApi cpuAccelerator() const noexcept { return cpuAccelerator_; }
 	void onLoad(const HostProfile& profile, LogService& log) override;
 
 protected:
@@ -104,6 +118,7 @@ private:
 	EffectManifest manifest_;
 	KernelSet kernels_;
 	Error error_;
+	GpuApi cpuAccelerator_{GpuApi::None};
 };
 
 /*! A factory that default-constructs a kernel effect class. */
