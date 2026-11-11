@@ -1,8 +1,7 @@
 name: CI
 
-# Runs the Full Check from AGENTS.md on macOS and the build-and-test subset on Linux, where the
-# Vulkan backend runs on Mesa's software driver and the OpenCL backend on pocl. The Windows job
-# may fail without blocking until a run confirms the MSVC build.
+# Runs the Full Check from AGENTS.md on macOS and the build-and-test subset on Linux and Windows.
+# On Linux the Vulkan backend runs on Mesa's software driver and the OpenCL backend on pocl.
 
 on:
   push:
@@ -95,7 +94,6 @@ jobs:
     name: Windows x64
     runs-on: windows-2025
     timeout-minutes: 60
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - name: Visual Studio developer environment

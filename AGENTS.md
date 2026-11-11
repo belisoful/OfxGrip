@@ -54,8 +54,8 @@ Code is commit-ready only when every check below passes.
 7. The debug build once with `-DOFXGRIP_BUILD_RUST=ON` (cargo build, `cargo test -p ofxgrip`, and
    the Rust bundle through the mini host), when the change touches the C contract or `rust/`
 
-CI also builds and tests on Linux (`ubuntu-24.04`, blocking) and on Windows (non-blocking until
-a run confirms the MSVC build; phase 4 in `Docs/Plan.md`). A change to platform code, a GPU
+CI also builds and tests on Linux (`ubuntu-24.04`) and on Windows (`windows-2025`, MSVC). Both
+jobs block. Read the CI run after every push. A change to platform code, a GPU
 backend, or the build files is also built and tested with GCC in the local Linux virtual machine
 before a commit:
 

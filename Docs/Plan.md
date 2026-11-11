@@ -102,7 +102,8 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: the inference seam (`Inference.hpp`, `InferenceEffect`) and the `InferKitBackend` adapter over InferKit 0.4.0's C interface, tested against a stand-in library.
 - Done: `OFXGRIP_AUTHENTICODE_COMMAND` signs each built `.ofx` on Windows. The OpenCL test context falls back to a CPU device, so the OpenCL tests run on pocl.
 - Open: the CUDA backend has not run on an NVIDIA GPU. No PTX exists for the sample or fixture kernels, so no effect declares CUDA yet and no CUDA golden image exists. This needs a machine with `nvcc` and an NVIDIA driver.
-- Open: the Windows build. The MSVC job compiled the core, the kernels, the adapter, the mini host, and the C contract before phase 4; the plug-ins, the tests, and the phase 4 sources have not been compiled by MSVC. The job stays non-blocking until a run confirms it. Windows on Arm means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL. The static C runtime on Windows is undecided.
+- Done: the Windows x64 build. MSVC 19.51 builds every target with `/W4 /WX` and the suite passes on `windows-2025` in CI (271 tests; the runner has no Vulkan headers and no OpenCL, so those backends are not built there). The job blocks.
+- Open: Windows on Arm. It means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL. No ARM64EC build has been made. The static C runtime on Windows is undecided, and no binary has been signed through `OFXGRIP_AUTHENTICODE_COMMAND` yet.
 - Open: an old-glibc build. The bundle built on Ubuntu 24.04 needs glibc 2.38. A release build belongs on the oldest distribution to support (a `manylinux`-style container).
 - Open: the Linux plug-in links `libOpenCL.so.1` and `libGL.so.1` at load time. Opening them at run time, as the Vulkan loader and the CUDA driver are, removes the last load-time dependency on a GPU runtime.
 - Open: a Wraz server backend over HTTP, a disk tier for the inference cache, and interactive renders that return before the model finishes.
@@ -169,9 +170,8 @@ The Full Check must pass before a commit.
 5. Coverage with the `coverage` preset at or above the gate in `CMakeLists.txt` (`OFXGRIP_COVERAGE_MIN`). The gate covers the product code (core, adapter, plug-ins); the mini host is reported separately. Phase 0 set the gate at 80% (measured 84%); phase 1 raises it to 85% (measured 88.7% on 2026-10-14); it rises to 90% as the tests grow, toward the developer's goal of complete coverage.
 6. `scripts/validate-bundle.py` on every built bundle.
 
-CI runs the same steps on `macos-26` and the build-and-test subset on `ubuntu-24.04`, both
-blocking. The `windows-2025` job runs the same subset and stays non-blocking until a run confirms
-the MSVC build. The Linux build is also checked locally in a Lima virtual machine
+CI runs the same steps on `macos-26` and the build-and-test subset on `ubuntu-24.04` and
+`windows-2025`. Every job blocks. The Linux build is also checked locally in a Lima virtual machine
 (`Docs/Testing.md`) when a change touches platform code.
 
 ## 7. Open items for the developer

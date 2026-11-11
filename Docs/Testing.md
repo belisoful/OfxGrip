@@ -84,7 +84,11 @@ limactl shell ofxgrip -- bash -lc 'cmake -S <checkout> -B ~/b/debug -G Ninja -DC
 
 With `libvulkan-dev`, `mesa-vulkan-drivers`, `ocl-icd-opencl-dev`, `pocl-opencl-icd`, and
 `libgl-dev` installed, the Vulkan tests run on Mesa's software driver and the OpenCL tests on
-pocl's CPU device, so neither needs a GPU.
+pocl's CPU device, so neither needs a GPU. macOS takes a GPU OpenCL device or none: Apple's CPU
+device, which an x86_64 process sees under Rosetta, refuses a kernel with a struct argument.
+
+The Windows build runs only in CI (`windows-2025`, MSVC). No Windows machine is available
+locally, so a push is the first time MSVC compiles a change.
 
 ## Backends without their hardware
 

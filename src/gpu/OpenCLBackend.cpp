@@ -38,8 +38,8 @@ std::map<void*, std::shared_ptr<OpenCLContext>>& contexts()
 	return table;
 }
 
-/*! The first GPU device of any platform, else the first CPU device (pocl on a machine or a CI
-    runner with no GPU). */
+/*! The first GPU device of any platform. Off macOS, the first CPU device when no GPU has a
+    driver (pocl on a machine or a CI runner with no GPU). */
 cl_device_id firstDevice()
 {
 	cl_uint platformCount = 0;
@@ -48,7 +48,14 @@ cl_device_id firstDevice()
 	}
 	std::vector<cl_platform_id> platforms(platformCount);
 	clGetPlatformIDs(platformCount, platforms.data(), nullptr);
-	for (const cl_device_type type : {static_cast<cl_device_type>(CL_DEVICE_TYPE_GPU), static_cast<cl_device_type>(CL_DEVICE_TYPE_CPU)}) {
+	// Apple's CPU device, which an x86_64 process sees under Rosetta, refuses a kernel with a
+	// struct argument (CL_INVALID_KERNEL_ARGS), so macOS takes a GPU device or none.
+#if defined(__APPLE__)
+	const std::vector<cl_device_type> types{CL_DEVICE_TYPE_GPU};
+#else
+	const std::vector<cl_device_type> types{CL_DEVICE_TYPE_GPU, CL_DEVICE_TYPE_CPU};
+#endif
+	for (const cl_device_type type : types) {
 		for (cl_platform_id platform : platforms) {
 			cl_device_id device = nullptr;
 			cl_uint count = 0;
