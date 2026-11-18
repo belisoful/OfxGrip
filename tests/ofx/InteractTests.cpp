@@ -4,6 +4,7 @@
 // the draw-suite and OpenGL paths, pen events that drag parameters inside one edit, modifier
 // tracking from key events, hover redraws, and the quirks the adapter applies.
 #include <ofxgrip/minihost/MiniHost.hpp>
+#include <ofxgrip/ofx/GlFunctions.hpp>
 #include <ofxgrip/ofx/Interact.hpp>
 #include <ofxgrip/ofx/Plugin.hpp>
 
@@ -14,6 +15,9 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace ofxgrip;
 using namespace ofxgrip::minihost;
@@ -228,7 +232,134 @@ TEST_F(Interact, FallsBackToTheOpenGLInteractWithoutTheDrawSuite)
 	EXPECT_EQ(instance_->overlayPenDown({50, 50}), kOfxStatOK);
 	EXPECT_EQ(instance_->overlayPenUp({52, 50}), kOfxStatOK);
 	EXPECT_EQ(numericValue(*instance_, "center"), (std::vector<double>{52, 50}));
-	EXPECT_TRUE(GlDrawKit::available() || !GlDrawKit::available());
+}
+
+namespace {
+
+std::vector<std::string>& glLog()
+{
+	static std::vector<std::string> log;
+	return log;
+}
+
+template <typename... Args>
+void glRecord(const char* op, Args... args)
+{
+	std::ostringstream text;
+	text << op;
+	((text << ' ' << args), ...);
+	glLog().push_back(text.str());
+}
+
+/*! A table that records every call. `current` is what it reports for the context. */
+GlFunctions recordingGl(bool current)
+{
+	GlFunctions table;
+	table.begin = [](unsigned mode) { glRecord("begin", mode); };
+	table.end = []() { glRecord("end"); };
+	table.vertex2d = [](double x, double y) { glRecord("vertex", x, y); };
+	table.color4f = [](float r, float g, float b, float a) { glRecord("color", r, g, b, a); };
+	table.lineWidth = [](float width) { glRecord("width", width); };
+	table.enable = [](unsigned capability) { glRecord("enable", capability); };
+	table.disable = [](unsigned capability) { glRecord("disable", capability); };
+	table.lineStipple = [](int factor, unsigned short pattern) { glRecord("stipple", factor, pattern); };
+	table.matrixMode = [](unsigned mode) { glRecord("matrix", mode); };
+	if (current) {
+		table.hasCurrentContext = []() { return true; };
+	} else {
+		table.hasCurrentContext = []() { return false; };
+	}
+	return table;
+}
+
+void drawEverything(GlDrawKit& kit)
+{
+	kit.setColor({1.0f, 0.5f, 0.25f, 1.0f});
+	kit.setLineWidth(0.0f);
+	kit.setLineWidth(2.0f);
+	kit.setStipple(OverlayStipple::Dash);
+	kit.setStipple(OverlayStipple::Solid);
+	kit.lines({{0, 0}, {1, 2}});
+	kit.lineStrip({{0, 0}, {1, 0}, {1, 1}});
+	kit.lineLoop({{0, 0}, {1, 0}, {1, 1}});
+	kit.rectangle({0, 0}, {4, 2});
+	kit.polygon({{0, 0}, {1, 0}, {0, 1}});
+	kit.ellipse({0, 0}, {4, 2});
+	kit.text("label", {0, 0}, OverlayTextAlign::Center);
+	kit.finish();
+}
+
+}  // namespace
+
+TEST(GlDrawKitCalls, DrawThroughTheTableWithACurrentContext)
+{
+	glLog().clear();
+	const GlFunctions table = recordingGl(true);
+	GlDrawKit kit(&table);
+	ASSERT_TRUE(kit.active());
+	kit.setColor({1.0f, 0.5f, 0.25f, 1.0f});
+	kit.setLineWidth(0.0f);
+	kit.setLineWidth(2.0f);
+	kit.setStipple(OverlayStipple::Dash);
+	kit.setStipple(OverlayStipple::Dot);
+	kit.setStipple(OverlayStipple::AltDash);
+	kit.setStipple(OverlayStipple::DotDash);
+	kit.setStipple(OverlayStipple::Solid);
+	kit.lines({{0, 0}, {1, 2}});
+	kit.lineStrip({{0, 0}, {1, 0}});
+	kit.lineLoop({{3, 4}});
+	kit.rectangle({0, 0}, {4, 2});
+	kit.polygon({{5, 6}});
+	kit.text("label", {0, 0}, OverlayTextAlign::Center);
+	const std::vector<std::string> expected{
+	    "color 1 0.5 0.25 1",
+	    "width 1",
+	    "width 2",
+	    "enable 2852", "stipple 1 61680",
+	    "enable 2852", "stipple 1 43690",
+	    "enable 2852", "stipple 1 3855",
+	    "enable 2852", "stipple 1 58596",
+	    "disable 2852",
+	    "begin 1", "vertex 0 0", "vertex 1 2", "end",
+	    "begin 3", "vertex 0 0", "vertex 1 0", "end",
+	    "begin 2", "vertex 3 4", "end",
+	    "begin 7", "vertex 0 0", "vertex 4 0", "vertex 4 2", "vertex 0 2", "end",
+	    "begin 9", "vertex 5 6", "end",
+	};
+	EXPECT_EQ(glLog(), expected);
+
+	glLog().clear();
+	kit.ellipse({0, 0}, {4, 2});
+	ASSERT_EQ(glLog().size(), 50u);
+	EXPECT_EQ(glLog().front(), "begin 2");
+	EXPECT_EQ(glLog()[1], "vertex 4 1");
+	EXPECT_EQ(glLog().back(), "end");
+
+	// Q-NUKE-011: drawing ends with the stipple off and the modelview matrix mode current.
+	glLog().clear();
+	kit.finish();
+	EXPECT_EQ(glLog(), (std::vector<std::string>{"disable 2852", "matrix 5888"}));
+}
+
+TEST(GlDrawKitCalls, DrawNothingWithoutAContextOrACompleteTable)
+{
+	glLog().clear();
+	const GlFunctions noContext = recordingGl(false);
+	GlDrawKit idle(&noContext);
+	EXPECT_FALSE(idle.active());
+	drawEverything(idle);
+
+	GlFunctions incomplete = recordingGl(true);
+	incomplete.matrixMode = nullptr;
+	GlDrawKit partial(&incomplete);
+	EXPECT_FALSE(partial.active());
+	drawEverything(partial);
+
+	GlDrawKit none(nullptr);
+	EXPECT_FALSE(none.active());
+	drawEverything(none);
+	EXPECT_TRUE(glLog().empty());
+	EXPECT_EQ(none.standardColor(OverlayColorRole::Selected).a, RecordingDrawKit().standardColor(OverlayColorRole::Selected).a);
 }
 
 TEST_F(Interact, HostsWithoutOverlaysOrEffectsWithoutControlsGetNone)

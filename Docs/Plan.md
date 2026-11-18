@@ -105,7 +105,7 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: the Windows x64 build. MSVC 19.51 builds every target with `/W4 /WX` and the suite passes on `windows-2025` in CI (271 tests; the runner has no Vulkan headers and no OpenCL, so those backends are not built there). The job blocks.
 - Open: Windows on Arm. It means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL. No ARM64EC build has been made. The static C runtime on Windows is undecided, and no binary has been signed through `OFXGRIP_AUTHENTICODE_COMMAND` yet.
 - Open: an old-glibc build. The bundle built on Ubuntu 24.04 needs glibc 2.38. A release build belongs on the oldest distribution to support (a `manylinux`-style container).
-- Open: the Linux plug-in links `libOpenCL.so.1` and `libGL.so.1` at load time. Opening them at run time, as the Vulkan loader and the CUDA driver are, removes the last load-time dependency on a GPU runtime.
+- Done: no GPU runtime is a load-time dependency. `OpenCLBackend` resolves every OpenCL function from a library opened at run time on every platform, and a plug-in that cannot open it declares no OpenCL render to an OpenCL host. The OpenGL overlay fallback calls through `GlFunctions`, which Linux fills from `libGL.so.1` or `libOpenGL.so.0` at run time. A Linux plug-in needs `libc` and `libm` only, and `scripts/validate-bundle.py` checks that. The Windows path of the OpenCL loader (`OpenCL.dll`) is not compiled in CI, because the runner has no OpenCL headers.
 - Open: a Wraz server backend over HTTP, a disk tier for the inference cache, and interactive renders that return before the model finishes.
 - Open: live hosts. No Windows or Linux machine with Resolve is known; no OpenFX host ships for Arm Linux.
 
@@ -130,7 +130,7 @@ OfxGrip/
                    extensions (Meta, Visibility, Versioning, Analysis, Licensing)
                    (GripTruck candidates, no OFX headers)
     ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,
-                   KernelEffect, InferenceEffect, Interact, RenderWatermark, Analysis, Plugin, OfxHostServices,
+                   KernelEffect, InferenceEffect, Interact, GlFunctions, RenderWatermark, Analysis, Plugin, OfxHostServices,
                    ResolveExtensions
     gpu/           KernelEngine, CpuKernelBackend, KernelCpu; MetalBackend, MetalKernelBackend,
                    MetalWatermark (macOS); OpenCLBackend, OpenCLWatermark; VulkanBackend,

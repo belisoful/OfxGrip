@@ -98,23 +98,30 @@ if(APPLE)
 endif()
 
 # ---- ofxgrip_gpu_opencl: the OpenCL backend for native kernels ---------------------------------------
+# Only the OpenCL headers are needed to build: the library is opened at run time, so a plug-in
+# that carries the backend still loads on a machine without OpenCL. macOS ships the headers in
+# the OpenCL framework.
 
 if(APPLE)
   set(OFXGRIP_OPENCL_FOUND ON)
-  set(OFXGRIP_OPENCL_LIBRARIES "-framework OpenCL")
-  set(OFXGRIP_OPENCL_INCLUDE_DIRS "")
+  set(OFXGRIP_OPENCL_INCLUDE_DIR "")
 else()
-  find_package(OpenCL QUIET)
-  set(OFXGRIP_OPENCL_FOUND ${OpenCL_FOUND})
-  set(OFXGRIP_OPENCL_LIBRARIES ${OpenCL_LIBRARIES})
-  set(OFXGRIP_OPENCL_INCLUDE_DIRS ${OpenCL_INCLUDE_DIRS})
+  find_path(OFXGRIP_OPENCL_INCLUDE_DIR CL/cl.h
+    HINTS ENV OPENCL_ROOT ENV OCL_ROOT
+    PATH_SUFFIXES include
+    DOC "The folder that holds CL/cl.h")
+  if(OFXGRIP_OPENCL_INCLUDE_DIR)
+    set(OFXGRIP_OPENCL_FOUND ON)
+  else()
+    set(OFXGRIP_OPENCL_FOUND OFF)
+  endif()
 endif()
 if(OFXGRIP_OPENCL_FOUND)
   add_library(ofxgrip_gpu_opencl STATIC gpu/OpenCLBackend.cpp gpu/OpenCLWatermark.cpp)
   add_library(OfxGrip::gpu_opencl ALIAS ofxgrip_gpu_opencl)
-  target_link_libraries(ofxgrip_gpu_opencl PUBLIC OfxGrip::core PRIVATE ${OFXGRIP_OPENCL_LIBRARIES})
-  if(OFXGRIP_OPENCL_INCLUDE_DIRS)
-    target_include_directories(ofxgrip_gpu_opencl SYSTEM PRIVATE ${OFXGRIP_OPENCL_INCLUDE_DIRS})
+  target_link_libraries(ofxgrip_gpu_opencl PUBLIC OfxGrip::core PRIVATE ${CMAKE_DL_LIBS})
+  if(OFXGRIP_OPENCL_INCLUDE_DIR)
+    target_include_directories(ofxgrip_gpu_opencl SYSTEM PRIVATE ${OFXGRIP_OPENCL_INCLUDE_DIR})
   endif()
   target_compile_definitions(ofxgrip_gpu_opencl PUBLIC OFXGRIP_HAS_OPENCL=1)
 endif()
@@ -166,6 +173,7 @@ add_library(ofxgrip STATIC
   ofx/Effect.cpp
   ofx/Analysis.cpp
   ofx/KernelEffect.cpp
+  ofx/GlFunctions.cpp
   ofx/Interact.cpp
   ofx/RenderWatermark.cpp
   ofx/InferenceEffect.cpp
@@ -186,16 +194,14 @@ endif()
 if(NOT APPLE)
   target_link_libraries(ofxgrip PUBLIC OfxGrip::gpu_cuda)
 endif()
-# The OpenGL overlay fallback compiles where the OpenGL headers exist; the draw suite needs none.
+# The OpenGL overlay fallback. macOS and Windows ship OpenGL with the system. Elsewhere the
+# library is opened at run time, so a plug-in loads on a machine without it.
 if(APPLE)
   target_link_libraries(ofxgrip PRIVATE "-framework OpenGL")
-  target_compile_definitions(ofxgrip PRIVATE OFXGRIP_HAS_OPENGL=1)
+elseif(WIN32)
+  target_link_libraries(ofxgrip PRIVATE opengl32)
 else()
-  find_package(OpenGL QUIET)
-  if(OpenGL_FOUND)
-    target_link_libraries(ofxgrip PRIVATE OpenGL::GL)
-    target_compile_definitions(ofxgrip PRIVATE OFXGRIP_HAS_OPENGL=1)
-  endif()
+  target_link_libraries(ofxgrip PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 # ---- ofxgrip_inference: inference backends over engines opened at run time ---------------------------

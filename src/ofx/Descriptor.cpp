@@ -11,6 +11,10 @@
 #include <ofxgrip/ofx/PropertySet.hpp>
 #include <ofxgrip/ofx/ResolveExtensions.hpp>
 
+#if defined(OFXGRIP_HAS_OPENCL)
+#include <ofxgrip/gpu/OpenCLBackend.hpp>
+#endif
+
 #include "ofxImageEffect.h"
 #include "ofxParam.h"
 
@@ -363,7 +367,16 @@ Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& p
 	props.trySetString(kOfxImageEffectPropMetalRenderSupported, cap.metalRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(kOfxImageEffectPropCudaRenderSupported, cap.cudaRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(kOfxImageEffectPropCudaStreamSupported, cap.cudaStream ? "true" : "false", &report.rejectedProperties);
-	props.trySetString(kOfxImageEffectPropOpenCLRenderSupported, cap.openCLRender ? "true" : "false", &report.rejectedProperties);
+	bool openCLRender = cap.openCLRender;
+#if defined(OFXGRIP_HAS_OPENCL)
+	// A host that renders with OpenCL has the library loaded. A plug-in that cannot open it
+	// declares no OpenCL render, so the host hands it CPU frames.
+	if (openCLRender && profile.capabilities.openCLRender && !opencl::OpenCLContext::runtimeAvailable()) {
+		openCLRender = false;
+		report.warnings.push_back("OpenCL renders are off: " + opencl::OpenCLContext::runtimeUnavailableReason());
+	}
+#endif
+	props.trySetString(kOfxImageEffectPropOpenCLRenderSupported, openCLRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(kOfxImageEffectPropCPURenderSupported, cap.cpuRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(resolve::kPropNoSpatialAwareness, cap.noSpatialAwareness ? "true" : "false", &report.rejectedProperties);
 	if (overlayEntry != nullptr && manifest.property("overlay", false) && profile.capabilities.supportsOverlays) {

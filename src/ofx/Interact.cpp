@@ -2,27 +2,13 @@
 // Copyright © 2026 Belisoful
 #include <ofxgrip/ofx/Interact.hpp>
 
+#include <ofxgrip/ofx/GlFunctions.hpp>
+
 #include <ofxgrip/ofx/Plugin.hpp>
 
 #include "ofxDrawSuite.h"
 #include "ofxInteract.h"
 #include "ofxKeySyms.h"
-
-#if defined(OFXGRIP_HAS_OPENGL)
-#if defined(__APPLE__)
-#define GL_SILENCE_DEPRECATION 1
-#include <OpenGL/OpenGL.h>
-#include <OpenGL/gl.h>
-#elif defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <GL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
-#endif
 
 #include <algorithm>
 #include <cmath>
@@ -251,22 +237,14 @@ void DrawSuiteKit::text(const std::string& utf8, const Point2D& position, Overla
 
 bool GlDrawKit::available() noexcept
 {
-#if defined(OFXGRIP_HAS_OPENGL)
-	return true;
-#else
-	return false;
-#endif
+	return GlFunctions::system() != nullptr;
 }
 
-GlDrawKit::GlDrawKit()
+GlDrawKit::GlDrawKit() : GlDrawKit(GlFunctions::system()) {}
+
+GlDrawKit::GlDrawKit(const GlFunctions* functions) : gl_(functions)
 {
-#if defined(OFXGRIP_HAS_OPENGL) && defined(__APPLE__)
-	active_ = CGLGetCurrentContext() != nullptr;
-#elif defined(OFXGRIP_HAS_OPENGL) && defined(_WIN32)
-	active_ = wglGetCurrentContext() != nullptr;
-#elif defined(OFXGRIP_HAS_OPENGL)
-	active_ = true;
-#endif
+	active_ = gl_ != nullptr && gl_->complete() && gl_->hasCurrentContext();
 }
 
 OverlayColor GlDrawKit::standardColor(OverlayColorRole role)
@@ -274,27 +252,24 @@ OverlayColor GlDrawKit::standardColor(OverlayColorRole role)
 	return RecordingDrawKit().standardColor(role);
 }
 
-#if defined(OFXGRIP_HAS_OPENGL)
-
-namespace {
-
-void emit(GLenum mode, const std::vector<Point2D>& points)
+void GlDrawKit::emit(unsigned mode, const std::vector<Point2D>& points)
 {
-	glBegin(mode);
-	for (const Point2D& p : points) {
-		glVertex2d(p.x, p.y);
+	if (!active_) {
+		return;
 	}
-	glEnd();
+	gl_->begin(mode);
+	for (const Point2D& p : points) {
+		gl_->vertex2d(p.x, p.y);
+	}
+	gl_->end();
 }
-
-}  // namespace
 
 void GlDrawKit::setColor(const OverlayColor& color)
 {
 	if (!active_) {
 		return;
 	}
-	glColor4f(color.r, color.g, color.b, color.a);
+	gl_->color4f(color.r, color.g, color.b, color.a);
 }
 
 void GlDrawKit::setLineWidth(float width)
@@ -302,7 +277,7 @@ void GlDrawKit::setLineWidth(float width)
 	if (!active_) {
 		return;
 	}
-	glLineWidth(width <= 0.0f ? 1.0f : width);
+	gl_->lineWidth(width <= 0.0f ? 1.0f : width);
 }
 
 void GlDrawKit::setStipple(OverlayStipple pattern)
@@ -311,10 +286,10 @@ void GlDrawKit::setStipple(OverlayStipple pattern)
 		return;
 	}
 	if (pattern == OverlayStipple::Solid) {
-		glDisable(GL_LINE_STIPPLE);
+		gl_->disable(gl::kLineStipple);
 		return;
 	}
-	GLushort bits = 0xFFFF;
+	unsigned short bits = 0xFFFF;
 	switch (pattern) {
 	case OverlayStipple::Dot: bits = 0xAAAA; break;
 	case OverlayStipple::Dash: bits = 0xF0F0; break;
@@ -322,48 +297,33 @@ void GlDrawKit::setStipple(OverlayStipple pattern)
 	case OverlayStipple::DotDash: bits = 0xE4E4; break;
 	case OverlayStipple::Solid: break;
 	}
-	glEnable(GL_LINE_STIPPLE);
-	glLineStipple(1, bits);
+	gl_->enable(gl::kLineStipple);
+	gl_->lineStipple(1, bits);
 }
 
 void GlDrawKit::lines(const std::vector<Point2D>& points)
 {
-	if (!active_) {
-		return;
-	}
-	emit(GL_LINES, points);
+	emit(gl::kLines, points);
 }
 
 void GlDrawKit::lineStrip(const std::vector<Point2D>& points)
 {
-	if (!active_) {
-		return;
-	}
-	emit(GL_LINE_STRIP, points);
+	emit(gl::kLineStrip, points);
 }
 
 void GlDrawKit::lineLoop(const std::vector<Point2D>& points)
 {
-	if (!active_) {
-		return;
-	}
-	emit(GL_LINE_LOOP, points);
+	emit(gl::kLineLoop, points);
 }
 
 void GlDrawKit::rectangle(const Point2D& a, const Point2D& b)
 {
-	if (!active_) {
-		return;
-	}
-	emit(GL_QUADS, {a, {b.x, a.y}, b, {a.x, b.y}});
+	emit(gl::kQuads, {a, {b.x, a.y}, b, {a.x, b.y}});
 }
 
 void GlDrawKit::polygon(const std::vector<Point2D>& points)
 {
-	if (!active_) {
-		return;
-	}
-	emit(GL_POLYGON, points);
+	emit(gl::kPolygon, points);
 }
 
 void GlDrawKit::ellipse(const Point2D& a, const Point2D& b)
@@ -379,14 +339,11 @@ void GlDrawKit::ellipse(const Point2D& a, const Point2D& b)
 		const double t = static_cast<double>(i) * 2.0 * kPi / 48.0;
 		rim.push_back({center.x + std::cos(t) * rx, center.y + std::sin(t) * ry});
 	}
-	emit(GL_LINE_LOOP, rim);
+	emit(gl::kLineLoop, rim);
 }
 
 void GlDrawKit::text(const std::string&, const Point2D&, OverlayTextAlign)
 {
-	if (!active_) {
-		return;
-	}
 	// Fixed-function OpenGL draws no text; the draw suite does.
 }
 
@@ -396,25 +353,9 @@ void GlDrawKit::finish()
 		return;
 	}
 	// Q-NUKE-011: the host expects the modelview matrix mode current when drawing ends.
-	glDisable(GL_LINE_STIPPLE);
-	glMatrixMode(GL_MODELVIEW);
+	gl_->disable(gl::kLineStipple);
+	gl_->matrixMode(gl::kModelView);
 }
-
-#else
-
-void GlDrawKit::setColor(const OverlayColor&) {}
-void GlDrawKit::setLineWidth(float) {}
-void GlDrawKit::setStipple(OverlayStipple) {}
-void GlDrawKit::lines(const std::vector<Point2D>&) {}
-void GlDrawKit::lineStrip(const std::vector<Point2D>&) {}
-void GlDrawKit::lineLoop(const std::vector<Point2D>&) {}
-void GlDrawKit::rectangle(const Point2D&, const Point2D&) {}
-void GlDrawKit::polygon(const std::vector<Point2D>&) {}
-void GlDrawKit::ellipse(const Point2D&, const Point2D&) {}
-void GlDrawKit::text(const std::string&, const Point2D&, OverlayTextAlign) {}
-void GlDrawKit::finish() {}
-
-#endif
 
 // ---- the live overlay ---------------------------------------------------------------------------
 

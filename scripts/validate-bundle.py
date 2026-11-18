@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Validates OpenFX bundles: layout, Info.plist agreement, exported symbols, and architectures.
+"""Validates OpenFX bundles: layout, Info.plist agreement, exported symbols, architectures, and,
+on Linux, that no GPU runtime library is a load-time dependency.
 
     scripts/validate-bundle.py <bundle-or-directory>...
 
@@ -16,6 +17,11 @@ ARCH_DIRS = {
     "linux": ["Linux-x86-64", "Linux-aarch64"],
     "win32": ["Win64", "Win-arm64", "Win-arm64x", "Win-arm64ec"],
 }
+
+
+# A GPU runtime may be absent on a user's machine, so a plug-in opens it at run time. One of
+# these among a binary's NEEDED entries stops the plug-in from loading there.
+GPU_RUNTIMES = ("libOpenCL.", "libGL.", "libOpenGL.", "libGLX.", "libEGL.", "libvulkan.", "libcuda.")
 
 
 def run(cmd):
@@ -59,6 +65,9 @@ def validate(bundle: Path) -> list:
             for needed in ("OfxGetNumberOfPlugins", "OfxGetPlugin"):
                 if needed not in symbols:
                     problems.append(f"{binary.name}: does not export {needed}")
+            for library in re.findall(r"\(NEEDED\).*\[(.+?)\]", run(["readelf", "-d", str(binary)])):
+                if library.startswith(GPU_RUNTIMES):
+                    problems.append(f"{binary.name}: links {library} at load time")
     if sys.platform == "darwin":
         plist_path = contents / "Info.plist"
         if not plist_path.exists():

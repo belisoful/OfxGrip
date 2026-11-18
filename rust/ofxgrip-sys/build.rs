@@ -49,12 +49,13 @@ fn main() {
     println!("cargo:rustc-link-lib=static=ofxgrip_kernels");
     println!("cargo:rustc-link-lib=static=ofxgrip_core");
     // The optional backends the adapter was built with. CMake's Rust integration sets these;
-    // a crate-driven build reads what its own CMake run produced.
+    // a crate-driven build reads what its own CMake run produced. The OpenCL library is opened
+    // at run time on every platform, and so is OpenGL on Linux, so neither is linked here.
     println!("cargo:rerun-if-env-changed=OFXGRIP_LINK_OPENCL");
     println!("cargo:rerun-if-env-changed=OFXGRIP_LINK_OPENGL");
     let target = env::var("TARGET").unwrap_or_default();
     let has_opencl = env::var("OFXGRIP_LINK_OPENCL").map(|v| v == "1").unwrap_or(target.contains("apple")) || dir.join("libofxgrip_gpu_opencl.a").exists();
-    let has_opengl = env::var("OFXGRIP_LINK_OPENGL").map(|v| v == "1").unwrap_or(target.contains("apple"));
+    let has_opengl = env::var("OFXGRIP_LINK_OPENGL").map(|v| v == "1").unwrap_or(target.contains("apple") || target.contains("windows"));
     if has_opencl {
         println!("cargo:rustc-link-lib=static=ofxgrip_gpu_opencl");
     }
@@ -64,25 +65,13 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=CoreFoundation");
         println!("cargo:rustc-link-lib=framework=OpenGL");
-        if has_opencl {
-            println!("cargo:rustc-link-lib=framework=OpenCL");
-        }
         println!("cargo:rustc-link-lib=dylib=c++");
     } else if target.contains("windows") {
         // The MSVC runtime is linked by the static libraries' object files.
         if has_opengl {
             println!("cargo:rustc-link-lib=dylib=opengl32");
         }
-        if has_opencl {
-            println!("cargo:rustc-link-lib=dylib=OpenCL");
-        }
     } else {
-        if has_opengl {
-            println!("cargo:rustc-link-lib=dylib=GL");
-        }
-        if has_opencl {
-            println!("cargo:rustc-link-lib=dylib=OpenCL");
-        }
         println!("cargo:rustc-link-lib=dylib=stdc++");
         println!("cargo:rustc-link-lib=dylib=pthread");
         println!("cargo:rustc-link-lib=dylib=dl");

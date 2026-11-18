@@ -27,6 +27,8 @@
 
 OFXGRIP_NAMESPACE_BEGIN
 
+struct GlFunctions;
+
 /*! The Natron extension that carries the device pixel ratio (Q-NATRON-003). */
 inline constexpr const char* kInteractPropScreenPixelRatio = "OfxInteractPropScreenPixelRatio";
 
@@ -84,15 +86,20 @@ private:
 	void* context_;
 };
 
-/*! The kit over OpenGL 2.1 immediate mode, for hosts without the draw suite. Draws nothing
-    when the build has no OpenGL. It reads the current matrices and leaves the modelview matrix
-    current (Q-NUKE-011). */
+/*! The kit over OpenGL 2.1 immediate mode, for hosts without the draw suite. It draws through
+    a `GlFunctions` table, reads the current matrices, and leaves the modelview matrix current
+    (Q-NUKE-011). */
 class GlDrawKit final : public DrawKit {
 public:
-	/*! Binds to the current OpenGL context. Without one (a headless host, a test) every call is
-	    a no-op, so a draw action still succeeds. */
+	/*! Binds to the platform's OpenGL and the current context. Without either (a machine with
+	    no OpenGL, a headless host, a test) every call is a no-op, so a draw action still
+	    succeeds. */
 	GlDrawKit();
-	/*! Whether this build can draw with OpenGL. */
+	/*! Binds to a given table. A null or incomplete table, or one that reports no current
+	    context, makes every call a no-op. The table outlives the kit. Introduced in OfxGrip
+	    0.5.0. */
+	explicit GlDrawKit(const GlFunctions* functions);
+	/*! Whether the process can reach the platform's OpenGL. */
 	static bool available() noexcept;
 	/*! Whether a context was current when the kit was made. */
 	bool active() const noexcept { return active_; }
@@ -111,6 +118,8 @@ public:
 	void finish();
 
 private:
+	void emit(unsigned mode, const std::vector<Point2D>& points);
+	const GlFunctions* gl_{nullptr};
 	bool active_{false};
 };
 

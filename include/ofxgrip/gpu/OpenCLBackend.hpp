@@ -12,6 +12,11 @@
 	of the process, so compiled programs and pooled scratch buffers are shared by every instance
 	that renders on it. Every type here is opaque; nothing in this header includes an OpenCL
 	header.
+
+	The OpenCL library is opened at run time (`OpenCL.dll`, `libOpenCL.so.1`, the OpenCL
+	framework on macOS), so a plug-in that links this backend loads on a machine without OpenCL
+	and reports the backend unavailable there. The environment variable `OFXGRIP_OPENCL_LIBRARY`
+	names another library. It is read once, when the runtime is first opened.
 */
 #pragma once
 
@@ -19,6 +24,7 @@
 #include <ofxgrip/core/Types.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -89,8 +95,18 @@ public:
 
 	/*! Whether the process has an OpenCL GPU device. */
 	static bool available() noexcept;
+	/*! Whether the OpenCL library is open with every function the backend calls. The first call
+	    opens it, and the outcome is kept. Introduced in OfxGrip 0.5.0. */
+	static bool runtimeAvailable() noexcept;
+	/*! Why `runtimeAvailable()` is false; empty when the library is open. Introduced in OfxGrip
+	    0.5.0. */
+	static std::string runtimeUnavailableReason();
+	/*! Opens a named library, resolves every function the backend calls, and closes it. An empty
+	    path tries the default names. The process's runtime is unchanged. Tests use it to cover
+	    the failure paths. Introduced in OfxGrip 0.5.0. */
+	static Error probeRuntime(const std::string& libraryPath);
 	/*! The context for a host's `cl_command_queue`. One per queue for the process lifetime; null
-	    for a null queue. */
+	    for a null queue and without the OpenCL library. */
 	static std::shared_ptr<OpenCLContext> forQueue(void* commandQueue);
 	/*! A context over the first GPU device and a queue the backend owns, for hosts and tests.
 	    Off macOS, the first CPU device serves when no GPU has an OpenCL driver. One per process.

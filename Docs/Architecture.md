@@ -25,6 +25,7 @@ Date: 2026-10-15. Phase 3.
               frame's backend or on a CPU-frame accelerator
    InferenceEffect  an effect whose render runs the source frame through an InferenceBackend
    Interact   OverlayInteract over the draw suite or OpenGL; the interact trampolines
+   GlFunctions  the OpenGL calls of the overlay fallback as a table, opened at run time on Linux
    RenderWatermark  the licensing watermark after render, on CPU, Metal, OpenCL, and CUDA frames
    Analysis   the analysis pass over clipGetImage inside a parameter action
    OfxHostServices  HostServices over the suites: parameters, persistence, feedback, threads,
@@ -40,7 +41,8 @@ Date: 2026-10-15. Phase 3.
    MetalBackend  a context per host command queue: pipeline cache, scratch pool, command
                  buffers over MTLBuffer frames and buffer-backed textures (metal-cpp)
    MetalKernelBackend  the engine's Metal path: function constants, textures, samplers
-   OpenCLBackend  a context per cl_command_queue: program cache, buffers, blocking fills
+   OpenCLBackend  a context per cl_command_queue: program cache, buffers, blocking fills;
+                 the OpenCL library is opened at run time
    VulkanBackend  OfxGrip's own compute device behind a loader opened at run time: SPIR-V
                  pipelines, float RGBA uploads, one job per dispatch
    VulkanKernelBackend  the engine's accelerator for CPU frames
@@ -258,8 +260,17 @@ pixel-buffer output becomes an image with the bottom row first.
   library of the build machine sets the oldest distribution a bundle loads on.
 - **Windows.** `Contents/Win64`, or `Contents/Win-arm64ec` for an ARM64EC build.
   `OFXGRIP_AUTHENTICODE_COMMAND` signs each built `.ofx`.
-- Each GPU runtime is opened at run time where the platform allows it (Vulkan, CUDA, InferKit),
-  so its absence makes a backend unavailable and never stops the plug-in from loading.
+- Each GPU runtime that a machine may lack is opened at run time: OpenCL, Vulkan, CUDA, and
+  InferKit on every platform, and OpenGL on Linux. Its absence makes a backend unavailable and
+  never stops the plug-in from loading. A Linux plug-in's load-time dependencies are the C
+  library and the math library; `scripts/validate-bundle.py` fails a bundle that lists a GPU
+  runtime among them.
+- `OpenCLContext` resolves every OpenCL function it calls from `OpenCL.dll`, `libOpenCL.so.1`,
+  or the OpenCL framework. A host that renders with OpenCL has the library loaded, and the
+  open finds that copy by name. `OFXGRIP_OPENCL_LIBRARY` names another library. A plug-in that
+  cannot open the library declares no OpenCL render to a host that offers one, so the host
+  hands it CPU frames.
+- macOS and Windows ship OpenGL with the system, so the adapter links it there.
 
 ## Overlays (phase 3)
 
@@ -268,8 +279,10 @@ first, drag with the Shift (constrain, snap 45°) and Alt (fine, anchor center) 
 through a `DrawKit`. Parts read and write parameters through the `OverlayParameters` seam, so
 the core tests them without a host. The adapter's `OverlayInteract` creates the effect's control
 over `EffectOverlayParameters`, brackets a drag in one `EditScope`, and draws through the draw
-suite when the host passes a draw context or through OpenGL otherwise; the OpenGL kit is a no-op
-without a current context. Hosts that draw their own point handles (`Quirk::NativeXYHandles`)
+suite when the host passes a draw context or through OpenGL otherwise. The OpenGL kit calls
+through a `GlFunctions` table and is a no-op without an OpenGL library or a current context. On
+Linux the table comes from `libGL.so.1` or `libOpenGL.so.0`, and the context check asks GLX and
+EGL. Hosts that draw their own point handles (`Quirk::NativeXYHandles`)
 make the point parts stand down.
 
 ## Licensing (phase 3)

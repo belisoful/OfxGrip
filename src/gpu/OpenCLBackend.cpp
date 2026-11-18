@@ -11,7 +11,17 @@
 #include <CL/cl.h>
 #endif
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -20,6 +30,149 @@ OFXGRIP_NAMESPACE_BEGIN
 namespace opencl {
 
 namespace {
+
+// Every OpenCL function the backend calls. The library is opened at run time, so the header
+// supplies the types and the signatures only.
+#define OFXGRIP_OPENCL_FUNCTIONS(X) \
+	X(clGetPlatformIDs) \
+	X(clGetDeviceIDs) \
+	X(clGetDeviceInfo) \
+	X(clCreateContext) \
+	X(clRetainContext) \
+	X(clReleaseContext) \
+	X(clCreateCommandQueue) \
+	X(clRetainCommandQueue) \
+	X(clReleaseCommandQueue) \
+	X(clGetCommandQueueInfo) \
+	X(clCreateBuffer) \
+	X(clReleaseMemObject) \
+	X(clCreateProgramWithSource) \
+	X(clBuildProgram) \
+	X(clGetProgramBuildInfo) \
+	X(clReleaseProgram) \
+	X(clCreateKernel) \
+	X(clReleaseKernel) \
+	X(clSetKernelArg) \
+	X(clEnqueueNDRangeKernel) \
+	X(clEnqueueCopyBuffer) \
+	X(clEnqueueReadBuffer) \
+	X(clEnqueueWriteBuffer) \
+	X(clFinish)
+
+struct Functions {
+#define OFXGRIP_OPENCL_MEMBER(name) decltype(&::name) name{nullptr};
+	OFXGRIP_OPENCL_FUNCTIONS(OFXGRIP_OPENCL_MEMBER)
+#undef OFXGRIP_OPENCL_MEMBER
+};
+
+void* openLibrary(const std::string& path) noexcept
+{
+#if defined(_WIN32)
+	return static_cast<void*>(::LoadLibraryA(path.c_str()));
+#else
+	return ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+void closeLibrary(void* library) noexcept
+{
+#if defined(_WIN32)
+	::FreeLibrary(static_cast<HMODULE>(library));
+#else
+	::dlclose(library);
+#endif
+}
+
+void* librarySymbol(void* library, const char* name) noexcept
+{
+#if defined(_WIN32)
+	return reinterpret_cast<void*>(::GetProcAddress(static_cast<HMODULE>(library), name));
+#else
+	return ::dlsym(library, name);
+#endif
+}
+
+std::vector<std::string> defaultLibraryNames()
+{
+	std::vector<std::string> names;
+	if (const char* named = std::getenv("OFXGRIP_OPENCL_LIBRARY"); named != nullptr && named[0] != '\0') {
+		names.emplace_back(named);
+		return names;
+	}
+#if defined(_WIN32)
+	names.emplace_back("OpenCL.dll");
+#elif defined(__APPLE__)
+	names.emplace_back("/System/Library/Frameworks/OpenCL.framework/OpenCL");
+#else
+	// A host that renders with OpenCL has the library loaded, and the open finds that copy by
+	// its name wherever the host keeps it.
+	names.emplace_back("libOpenCL.so.1");
+	names.emplace_back("libOpenCL.so");
+#endif
+	return names;
+}
+
+/*! Opens the first library of `names` that exists and resolves every function from it. The
+    library stays open when the result is no error. */
+Error loadFunctions(const std::vector<std::string>& names, Functions& out, void*& library)
+{
+	library = nullptr;
+	std::string opened;
+	for (const std::string& name : names) {
+		library = openLibrary(name);
+		if (library != nullptr) {
+			opened = name;
+			break;
+		}
+	}
+	if (library == nullptr) {
+		return Error::make(ErrorCode::MissingHostFeature, "No OpenCL library is installed").with("library", names.empty() ? std::string() : names.front());
+	}
+	const char* missing = nullptr;
+#define OFXGRIP_OPENCL_RESOLVE(name) \
+	out.name = reinterpret_cast<decltype(out.name)>(librarySymbol(library, #name)); \
+	if (out.name == nullptr && missing == nullptr) { \
+		missing = #name; \
+	}
+	OFXGRIP_OPENCL_FUNCTIONS(OFXGRIP_OPENCL_RESOLVE)
+#undef OFXGRIP_OPENCL_RESOLVE
+	if (missing != nullptr) {
+		closeLibrary(library);
+		library = nullptr;
+		out = Functions{};
+		return Error::make(ErrorCode::MissingHostFeature, "The library lacks an OpenCL function").with("library", opened).with("function", missing);
+	}
+	return Error::none();
+}
+
+/*! The process's OpenCL runtime: the function table, or the reason there is none. */
+struct Runtime {
+	Functions functions;
+	bool loaded{false};
+	std::string reason;
+};
+
+const Runtime& runtime()
+{
+	static const Runtime shared = [] {
+		Runtime made;
+		void* library = nullptr;
+		if (Error e = loadFunctions(defaultLibraryNames(), made.functions, library)) {
+			made.reason = e.describe();
+			return made;
+		}
+		made.loaded = true;
+		return made;
+	}();
+	return shared;
+}
+
+/*! The loaded functions. Every caller holds an OpenCL object, which exists only when the
+    runtime loaded, or has checked `runtime().loaded`. */
+const Functions& cl()
+{
+	return runtime().functions;
+}
 
 Error clError(cl_int status, const char* what)
 {
@@ -42,12 +195,15 @@ std::map<void*, std::shared_ptr<OpenCLContext>>& contexts()
     driver (pocl on a machine or a CI runner with no GPU). */
 cl_device_id firstDevice()
 {
+	if (!runtime().loaded) {
+		return nullptr;
+	}
 	cl_uint platformCount = 0;
-	if (clGetPlatformIDs(0, nullptr, &platformCount) != CL_SUCCESS || platformCount == 0) {
+	if (cl().clGetPlatformIDs(0, nullptr, &platformCount) != CL_SUCCESS || platformCount == 0) {
 		return nullptr;
 	}
 	std::vector<cl_platform_id> platforms(platformCount);
-	clGetPlatformIDs(platformCount, platforms.data(), nullptr);
+	cl().clGetPlatformIDs(platformCount, platforms.data(), nullptr);
 	// Apple's CPU device, which an x86_64 process sees under Rosetta, refuses a kernel with a
 	// struct argument (CL_INVALID_KERNEL_ARGS), so macOS takes a GPU device or none.
 #if defined(__APPLE__)
@@ -59,7 +215,7 @@ cl_device_id firstDevice()
 		for (cl_platform_id platform : platforms) {
 			cl_device_id device = nullptr;
 			cl_uint count = 0;
-			if (clGetDeviceIDs(platform, type, 1, &device, &count) == CL_SUCCESS && count > 0) {
+			if (cl().clGetDeviceIDs(platform, type, 1, &device, &count) == CL_SUCCESS && count > 0) {
 				return device;
 			}
 		}
@@ -75,7 +231,7 @@ struct OpenCLKernel::Impl {
 	~Impl()
 	{
 		if (kernel != nullptr) {
-			clReleaseKernel(kernel);
+			cl().clReleaseKernel(kernel);
 		}
 	}
 };
@@ -122,16 +278,16 @@ struct OpenCLContext::Impl {
 	~Impl()
 	{
 		for (auto& [name, program] : programs) {
-			clReleaseProgram(program);
+			cl().clReleaseProgram(program);
 		}
 		for (auto& [buffer, length] : pool) {
-			clReleaseMemObject(buffer);
+			cl().clReleaseMemObject(buffer);
 		}
 		if (queue != nullptr) {
-			clReleaseCommandQueue(queue);
+			cl().clReleaseCommandQueue(queue);
 		}
 		if (context != nullptr) {
-			clReleaseContext(context);
+			cl().clReleaseContext(context);
 		}
 	}
 
@@ -153,7 +309,7 @@ OpenCLBuffer::Impl::~Impl()
 			return;
 		}
 	}
-	clReleaseMemObject(buffer);
+	cl().clReleaseMemObject(buffer);
 }
 
 OpenCLContext::OpenCLContext() : impl_(std::make_unique<Impl>()) {}
@@ -165,9 +321,30 @@ bool OpenCLContext::available() noexcept
 	return systemDefault() != nullptr;
 }
 
+bool OpenCLContext::runtimeAvailable() noexcept
+{
+	return runtime().loaded;
+}
+
+std::string OpenCLContext::runtimeUnavailableReason()
+{
+	return runtime().reason;
+}
+
+Error OpenCLContext::probeRuntime(const std::string& libraryPath)
+{
+	Functions functions;
+	void* library = nullptr;
+	if (Error e = loadFunctions(libraryPath.empty() ? defaultLibraryNames() : std::vector<std::string>{libraryPath}, functions, library)) {
+		return e;
+	}
+	closeLibrary(library);
+	return Error::none();
+}
+
 std::shared_ptr<OpenCLContext> OpenCLContext::forQueue(void* commandQueue)
 {
-	if (commandQueue == nullptr) {
+	if (commandQueue == nullptr || !runtime().loaded) {
 		return nullptr;
 	}
 	std::lock_guard<std::mutex> lock(registryMutex());
@@ -176,13 +353,13 @@ std::shared_ptr<OpenCLContext> OpenCLContext::forQueue(void* commandQueue)
 		auto queue = static_cast<cl_command_queue>(commandQueue);
 		cl_context context = nullptr;
 		cl_device_id device = nullptr;
-		if (clGetCommandQueueInfo(queue, CL_QUEUE_CONTEXT, sizeof context, &context, nullptr) != CL_SUCCESS || clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof device, &device, nullptr) != CL_SUCCESS) {
+		if (cl().clGetCommandQueueInfo(queue, CL_QUEUE_CONTEXT, sizeof context, &context, nullptr) != CL_SUCCESS || cl().clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof device, &device, nullptr) != CL_SUCCESS) {
 			contexts().erase(commandQueue);
 			return nullptr;
 		}
 		std::shared_ptr<OpenCLContext> made(new OpenCLContext());
-		clRetainCommandQueue(queue);
-		clRetainContext(context);
+		cl().clRetainCommandQueue(queue);
+		cl().clRetainContext(context);
 		made->impl_->queue = queue;
 		made->impl_->context = context;
 		made->impl_->device = device;
@@ -199,13 +376,13 @@ std::shared_ptr<OpenCLContext> OpenCLContext::systemDefault()
 			return nullptr;
 		}
 		cl_int status = CL_SUCCESS;
-		cl_context ctx = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
+		cl_context ctx = cl().clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
 		if (ctx == nullptr) {
 			return nullptr;
 		}
-		cl_command_queue queue = clCreateCommandQueue(ctx, device, 0, &status);
+		cl_command_queue queue = cl().clCreateCommandQueue(ctx, device, 0, &status);
 		if (queue == nullptr) {
-			clReleaseContext(ctx);
+			cl().clReleaseContext(ctx);
 			return nullptr;
 		}
 		std::shared_ptr<OpenCLContext> made(new OpenCLContext());
@@ -238,7 +415,7 @@ void* OpenCLContext::device() const noexcept
 std::string OpenCLContext::deviceName() const
 {
 	char name[256] = {};
-	if (clGetDeviceInfo(impl_->device, CL_DEVICE_NAME, sizeof name - 1, name, nullptr) != CL_SUCCESS) {
+	if (cl().clGetDeviceInfo(impl_->device, CL_DEVICE_NAME, sizeof name - 1, name, nullptr) != CL_SUCCESS) {
 		return {};
 	}
 	return name;
@@ -256,19 +433,19 @@ Error OpenCLContext::kernel(std::string_view programName, std::string_view sourc
 			const char* text = source.data();
 			const std::size_t length = source.size();
 			cl_int status = CL_SUCCESS;
-			program = clCreateProgramWithSource(impl_->context, 1, &text, &length, &status);
+			program = cl().clCreateProgramWithSource(impl_->context, 1, &text, &length, &status);
 			if (program == nullptr) {
 				return clError(status, "clCreateProgramWithSource").with("program", key);
 			}
-			status = clBuildProgram(program, 1, &impl_->device, "", nullptr, nullptr);
+			status = cl().clBuildProgram(program, 1, &impl_->device, "", nullptr, nullptr);
 			if (status != CL_SUCCESS) {
 				std::size_t logLength = 0;
-				clGetProgramBuildInfo(program, impl_->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logLength);
+				cl().clGetProgramBuildInfo(program, impl_->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logLength);
 				std::string log(logLength, '\0');
 				if (logLength > 0) {
-					clGetProgramBuildInfo(program, impl_->device, CL_PROGRAM_BUILD_LOG, logLength, log.data(), nullptr);
+					cl().clGetProgramBuildInfo(program, impl_->device, CL_PROGRAM_BUILD_LOG, logLength, log.data(), nullptr);
 				}
-				clReleaseProgram(program);
+				cl().clReleaseProgram(program);
 				return Error::make(ErrorCode::Render, "The OpenCL program did not build", log).with("program", key);
 			}
 			impl_->programs[key] = program;
@@ -276,7 +453,7 @@ Error OpenCLContext::kernel(std::string_view programName, std::string_view sourc
 	}
 	cl_int status = CL_SUCCESS;
 	const std::string name(kernelName);
-	cl_kernel kernel = clCreateKernel(program, name.c_str(), &status);
+	cl_kernel kernel = cl().clCreateKernel(program, name.c_str(), &status);
 	if (kernel == nullptr) {
 		return Error::make(ErrorCode::NotFound, "The OpenCL program has no such kernel").with("program", std::string(programName)).with("kernel", name);
 	}
@@ -300,12 +477,12 @@ Error OpenCLContext::enqueue(const OpenCLDispatch& dispatch)
 			return Error::make(ErrorCode::BadHandle, "A dispatch buffer argument is null").with("index", std::to_string(arg.index));
 		}
 		auto buffer = static_cast<cl_mem>(arg.handle);
-		if (cl_int status = clSetKernelArg(kernel, arg.index, sizeof buffer, &buffer); status != CL_SUCCESS) {
+		if (cl_int status = cl().clSetKernelArg(kernel, arg.index, sizeof buffer, &buffer); status != CL_SUCCESS) {
 			return clError(status, "clSetKernelArg").with("index", std::to_string(arg.index));
 		}
 	}
 	for (const OpenCLDispatch::BytesArg& arg : dispatch.bytes) {
-		if (cl_int status = clSetKernelArg(kernel, arg.index, arg.length, arg.data); status != CL_SUCCESS) {
+		if (cl_int status = cl().clSetKernelArg(kernel, arg.index, arg.length, arg.data); status != CL_SUCCESS) {
 			return clError(status, "clSetKernelArg").with("index", std::to_string(arg.index));
 		}
 	}
@@ -316,7 +493,7 @@ Error OpenCLContext::enqueue(const OpenCLDispatch& dispatch)
 		global[0] = (global[0] + dispatch.localSize[0] - 1) / dispatch.localSize[0] * dispatch.localSize[0];
 		global[1] = (global[1] + dispatch.localSize[1] - 1) / dispatch.localSize[1] * dispatch.localSize[1];
 	}
-	if (cl_int status = clEnqueueNDRangeKernel(impl_->queue, kernel, 2, nullptr, global, local ? dispatch.localSize : nullptr, 0, nullptr, nullptr); status != CL_SUCCESS) {
+	if (cl_int status = cl().clEnqueueNDRangeKernel(impl_->queue, kernel, 2, nullptr, global, local ? dispatch.localSize : nullptr, 0, nullptr, nullptr); status != CL_SUCCESS) {
 		return clError(status, "clEnqueueNDRangeKernel");
 	}
 	return Error::none();
@@ -330,7 +507,7 @@ Error OpenCLContext::copy(void* sourceBuffer, std::size_t sourceOffset, void* de
 	if (length == 0) {
 		return Error::none();
 	}
-	if (cl_int status = clEnqueueCopyBuffer(impl_->queue, static_cast<cl_mem>(sourceBuffer), static_cast<cl_mem>(destinationBuffer), sourceOffset, destinationOffset, length, 0, nullptr, nullptr); status != CL_SUCCESS) {
+	if (cl_int status = cl().clEnqueueCopyBuffer(impl_->queue, static_cast<cl_mem>(sourceBuffer), static_cast<cl_mem>(destinationBuffer), sourceOffset, destinationOffset, length, 0, nullptr, nullptr); status != CL_SUCCESS) {
 		return clError(status, "clEnqueueCopyBuffer");
 	}
 	return Error::none();
@@ -347,7 +524,7 @@ Error OpenCLContext::fill(void* buffer, std::size_t offset, std::size_t length, 
 	// A blocking write of a host pattern: clEnqueueFillBuffer writes wrong bytes on some
 	// implementations (seen on Apple's), and a fill is never on a render path.
 	const std::vector<std::uint8_t> pattern(length, value);
-	if (cl_int status = clEnqueueWriteBuffer(impl_->queue, static_cast<cl_mem>(buffer), CL_TRUE, offset, length, pattern.data(), 0, nullptr, nullptr); status != CL_SUCCESS) {
+	if (cl_int status = cl().clEnqueueWriteBuffer(impl_->queue, static_cast<cl_mem>(buffer), CL_TRUE, offset, length, pattern.data(), 0, nullptr, nullptr); status != CL_SUCCESS) {
 		return clError(status, "clEnqueueWriteBuffer");
 	}
 	return Error::none();
@@ -361,7 +538,7 @@ Error OpenCLContext::read(void* buffer, std::size_t offset, std::size_t length, 
 	if (length == 0) {
 		return Error::none();
 	}
-	if (cl_int status = clEnqueueReadBuffer(impl_->queue, static_cast<cl_mem>(buffer), CL_TRUE, offset, length, destination, 0, nullptr, nullptr); status != CL_SUCCESS) {
+	if (cl_int status = cl().clEnqueueReadBuffer(impl_->queue, static_cast<cl_mem>(buffer), CL_TRUE, offset, length, destination, 0, nullptr, nullptr); status != CL_SUCCESS) {
 		return clError(status, "clEnqueueReadBuffer");
 	}
 	return Error::none();
@@ -375,7 +552,7 @@ Error OpenCLContext::write(void* buffer, std::size_t offset, std::size_t length,
 	if (length == 0) {
 		return Error::none();
 	}
-	if (cl_int status = clEnqueueWriteBuffer(impl_->queue, static_cast<cl_mem>(buffer), CL_TRUE, offset, length, source, 0, nullptr, nullptr); status != CL_SUCCESS) {
+	if (cl_int status = cl().clEnqueueWriteBuffer(impl_->queue, static_cast<cl_mem>(buffer), CL_TRUE, offset, length, source, 0, nullptr, nullptr); status != CL_SUCCESS) {
 		return clError(status, "clEnqueueWriteBuffer");
 	}
 	return Error::none();
@@ -383,7 +560,7 @@ Error OpenCLContext::write(void* buffer, std::size_t offset, std::size_t length,
 
 Error OpenCLContext::finish()
 {
-	if (cl_int status = clFinish(impl_->queue); status != CL_SUCCESS) {
+	if (cl_int status = cl().clFinish(impl_->queue); status != CL_SUCCESS) {
 		return clError(status, "clFinish");
 	}
 	return Error::none();
@@ -410,7 +587,7 @@ OpenCLBuffer OpenCLContext::scratch(std::size_t length)
 	if (found == nullptr) {
 		cl_int status = CL_SUCCESS;
 		foundLength = std::max<std::size_t>(length, 16);
-		found = clCreateBuffer(impl_->context, CL_MEM_READ_WRITE, foundLength, nullptr, &status);
+		found = cl().clCreateBuffer(impl_->context, CL_MEM_READ_WRITE, foundLength, nullptr, &status);
 		if (found == nullptr) {
 			return {};
 		}
@@ -428,7 +605,7 @@ OpenCLBuffer OpenCLContext::newBuffer(std::size_t length, const void* initial)
 {
 	const std::size_t size = std::max<std::size_t>(length, 16);
 	cl_int status = CL_SUCCESS;
-	cl_mem made = clCreateBuffer(impl_->context, CL_MEM_READ_WRITE, size, nullptr, &status);
+	cl_mem made = cl().clCreateBuffer(impl_->context, CL_MEM_READ_WRITE, size, nullptr, &status);
 	if (made == nullptr) {
 		return {};
 	}
@@ -467,7 +644,7 @@ void OpenCLContext::drainPool()
 		drained.swap(impl_->pool);
 	}
 	for (auto& [buffer, length] : drained) {
-		clReleaseMemObject(buffer);
+		cl().clReleaseMemObject(buffer);
 	}
 }
 

@@ -80,9 +80,12 @@ bundle there (a copy, never a symlink: Q-RESOLVE-025). Resolve caches descriptor
 - No host SDK beyond the headers. No Objective-C: Metal is reached through metal-cpp, and exactly
   one translation unit (`src/gpu/MetalCppImpl.cpp`) defines its private implementation.
 - Optional: the Vulkan headers on the build machine build the Vulkan backend
-  (`OFXGRIP_VULKAN_INCLUDE_DIR`, `VULKAN_SDK`, or a system package). The Vulkan loader, the CUDA
-  driver, and InferKit are opened at run time and are never linked. The CUDA backend declares
-  the driver's interface itself (`CudaDriver.hpp`) and includes no NVIDIA header.
+  (`OFXGRIP_VULKAN_INCLUDE_DIR`, `VULKAN_SDK`, or a system package), and the OpenCL headers
+  build the OpenCL backend on Linux and Windows (`OFXGRIP_OPENCL_INCLUDE_DIR` or a system
+  package). The OpenCL library, the Vulkan loader, the CUDA driver, and InferKit are opened at
+  run time and are never linked. So is OpenGL on Linux, through `GlFunctions`, with no OpenGL
+  header. The CUDA backend declares the driver's interface itself (`CudaDriver.hpp`) and
+  includes no NVIDIA header.
 
 The reference repositories under `local/` are concept-only (D-001). Never copy, port, or closely
 paraphrase their code. The official OpenFX headers are a separate case.
@@ -100,8 +103,8 @@ paraphrase their code. The official OpenFX headers are a separate case.
   `VisibilityExtension`, `VersioningExtension`, `AnalysisExtension`). These are the GripTruck
   candidates.
 - `include/ofxgrip/ofx/` — the OpenFX adapter: `Suites`, `PropertySet`, `Actions`, `Descriptor`,
-  `Effect`, `KernelEffect`, `InferenceEffect`, `Interact`, `RenderWatermark`, `Analysis`, `Plugin`,
-  `OfxHostServices`, `ResolveExtensions`.
+  `Effect`, `KernelEffect`, `InferenceEffect`, `Interact`, `GlFunctions`, `RenderWatermark`,
+  `Analysis`, `Plugin`, `OfxHostServices`, `ResolveExtensions`.
 - `include/ofxgrip/c/ofxgrip_c.h`, `src/c/` — the C contract. It is additive: a point release adds
   functions and never changes or removes one.
 - `rust/` — the Cargo workspace: `ofxgrip-sys` (raw bindings; links `OFXGRIP_BUILD_DIR` or builds
@@ -149,8 +152,10 @@ Rules of the layering:
   and never requires `slangc`.
 - The licensing status an instance renders under comes from the snapshot's license state; the
   watermark goes on after `render()` in the adapter, on CPU, Metal, OpenCL, and CUDA frames.
-- A GPU runtime that may be absent on a user's machine (the Vulkan loader, the CUDA driver,
-  InferKit) is opened at run time, never linked. Its absence makes the backend unavailable.
+- A GPU runtime that may be absent on a user's machine (the OpenCL library, the Vulkan loader,
+  the CUDA driver, InferKit, and OpenGL on Linux) is opened at run time, never linked. Its
+  absence makes the backend unavailable. `scripts/validate-bundle.py` fails a Linux bundle that
+  lists one among its load-time dependencies.
 - A model runs on an `InferenceRunner` thread. The render thread waits, polls the host's abort,
   and reads the instance's `InferenceCache`.
 - A Metal render encodes on the host's queue and commits without waiting. The only process-wide

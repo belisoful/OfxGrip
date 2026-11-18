@@ -47,6 +47,7 @@ add_executable(ofxgrip_ofx_tests
   ofx/DescriptorTests.cpp
   ofx/PluginTests.cpp
   ofx/Phase2Tests.cpp
+  ofx/GlFunctionsTests.cpp
   ofx/InteractTests.cpp
   ofx/LicensingEffectTests.cpp
   ofx/InferenceEffectTests.cpp)
@@ -105,6 +106,13 @@ if(TARGET ofxgrip_gpu_opencl)
   add_executable(ofxgrip_opencl_tests gpu/OpenCLBackendTests.cpp)
   target_link_libraries(ofxgrip_opencl_tests PRIVATE OfxGrip::gpu_opencl GTest::gtest_main)
   gtest_discover_tests(ofxgrip_opencl_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+  # A machine without OpenCL: the program names a library that does not exist before anything
+  # opens the runtime, then loads the Gain bundle as an OpenCL host.
+  add_executable(ofxgrip_opencl_absent_tests gpu/OpenCLRuntimeAbsentTests.cpp)
+  target_link_libraries(ofxgrip_opencl_absent_tests PRIVATE OfxGrip::minihost GTest::gtest)
+  target_compile_definitions(ofxgrip_opencl_absent_tests PRIVATE OFXGRIP_GAIN_BUNDLE="${_gain_bundle}")
+  add_dependencies(ofxgrip_opencl_absent_tests ofxgrip_plugin_OfxGripGain)
+  gtest_discover_tests(ofxgrip_opencl_absent_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache" RESOURCE_LOCK ofxgrip_test_folders)
 endif()
 
 add_executable(ofxgrip_c_tests c/CContractTests.cpp)

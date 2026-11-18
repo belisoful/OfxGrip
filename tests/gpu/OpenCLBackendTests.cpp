@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 using namespace ofxgrip;
@@ -46,6 +47,37 @@ struct Args {
 	}
 
 }  // namespace
+
+TEST(OpenCLBackend, ProbesALibraryWithoutChangingTheRuntime)
+{
+	const bool before = OpenCLContext::runtimeAvailable();
+	EXPECT_EQ(OpenCLContext::runtimeUnavailableReason().empty(), before);
+
+	const Error missing = OpenCLContext::probeRuntime("/nonexistent/ofxgrip/libOpenCL.so");
+	EXPECT_EQ(missing.code(), ErrorCode::MissingHostFeature);
+	EXPECT_NE(missing.describe().find("/nonexistent/ofxgrip/libOpenCL.so"), std::string::npos);
+
+#if defined(_WIN32)
+	const char* notOpenCL = "kernel32.dll";
+#elif defined(__APPLE__)
+	const char* notOpenCL = "/usr/lib/libSystem.B.dylib";
+#else
+	const char* notOpenCL = "libm.so.6";
+#endif
+	const Error wrong = OpenCLContext::probeRuntime(notOpenCL);
+	EXPECT_EQ(wrong.code(), ErrorCode::MissingHostFeature);
+	EXPECT_NE(wrong.describe().find("clGetPlatformIDs"), std::string::npos);
+
+	EXPECT_EQ(OpenCLContext::probeRuntime({}).ok(), before);
+	EXPECT_EQ(OpenCLContext::runtimeAvailable(), before);
+}
+
+TEST(OpenCLBackend, ADeviceImpliesTheRuntime)
+{
+	OFXGRIP_OPENCL_OR_SKIP();
+	EXPECT_TRUE(OpenCLContext::runtimeAvailable());
+	EXPECT_TRUE(OpenCLContext::runtimeUnavailableReason().empty());
+}
 
 TEST(OpenCLBackend, SystemDefaultContextIsSharedAndDescribed)
 {
