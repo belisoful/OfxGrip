@@ -51,7 +51,8 @@ add_library(ofxgrip_core STATIC
   core/Watermark.cpp
   core/Licensing.cpp
   core/LicensingProviders.cpp
-  core/Inference.cpp)
+  core/Inference.cpp
+  core/InferenceDiskCache.cpp)
 add_library(OfxGrip::core ALIAS ofxgrip_core)
 target_include_directories(ofxgrip_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(ofxgrip_core PUBLIC OfxGrip::options PRIVATE nlohmann_json::nlohmann_json)

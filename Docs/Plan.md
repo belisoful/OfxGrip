@@ -51,7 +51,7 @@ The FxGrip profile (`Research/Analysis/FxGrip.md` §13) divides FxGrip into what
 | `FxGripMTLDeviceCache`, `FxGripImageBuffer` | `GpuImage` descriptor (API, device, queue, handle, layout) and a per-queue resource pool; CPU `ImageView` with pixel-format dispatch. | 0 (CPU), 1 (Metal) |
 | Licensing (`FxGripLicensing`, provider protocol) | `LicensingProvider` interface, entitlement, and `LicensingExtension` in the core with the built-in `static`, `trial`, and `file` providers; license state in the render snapshot; the watermark after render on CPU, Metal, and OpenCL frames. Providers per store are a separate decision (D-010). | 3 |
 | Shader metadata (`FxGripShaderMetadata`, JSON5 in shader source) | `KernelMetadata` scans the `FxGripShader` JSON5 block in the `.slang` source into `ParameterSpec`s; `KernelLayout` binds the globals from the slangc reflection JSON (D-009). | 3 |
-| Inference seam (`FxGripInferenceBackend`) | `Inference.hpp` (request, result, backend, passthrough, frame cache, runner) and `InferenceEffect`; `InferKitBackend` over InferKit's C interface. The engine runs on the runner's thread, never on the render thread. A Wraz server over HTTP is open. | 4 |
+| Inference seam (`FxGripInferenceBackend`) | `Inference.hpp` (request, result, backend, passthrough, frame cache, runner), `InferenceDiskCache` (the disk tier), and `InferenceEffect`; `InferKitBackend` over InferKit's C interface. The engine runs on the runner's thread, never on the render thread. A Wraz server over HTTP is open. | 4 |
 | I18N, About and Debug menus, instance tracker, regression | Extensions over the event bus. Menus become choice parameters. | 2 |
 | Registrars (`PROPlugInRegistering`) | Bounded plug-in table with one generated `mainEntry` trampoline per plug-in; `OfxGetNumberOfPlugins`/`OfxGetPlugin` from one macro. | 0 |
 | FCPXML, workflow extensions, Space, RealityKit, StoreKit | Not applicable to OFX. The host scripting bridge (D-007) covers Resolve's Lua and Python later. | — |
@@ -106,7 +106,8 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Open: Windows on Arm. It means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL. No ARM64EC build has been made. The static C runtime on Windows is undecided, and no binary has been signed through `OFXGRIP_AUTHENTICODE_COMMAND` yet.
 - Open: an old-glibc build. The bundle built on Ubuntu 24.04 needs glibc 2.38. A release build belongs on the oldest distribution to support (a `manylinux`-style container).
 - Done: no GPU runtime is a load-time dependency. `OpenCLBackend` resolves every OpenCL function from a library opened at run time on every platform, and a plug-in that cannot open it declares no OpenCL render to an OpenCL host. The OpenGL overlay fallback calls through `GlFunctions`, which Linux fills from `libGL.so.1` or `libOpenGL.so.0` at run time. A Linux plug-in needs `libc` and `libm` only, and `scripts/validate-bundle.py` checks that. The Windows path of the OpenCL loader (`OpenCL.dll`) is not compiled in CI, because the runner has no OpenCL headers.
-- Open: a Wraz server backend over HTTP, a disk tier for the inference cache, and interactive renders that return before the model finishes.
+- Done: the disk tier of the inference cache (`InferenceDiskCache`). A file per output is named by the SHA-256 of the cache signature and the source pixels, so an output survives a restart and is never served for other pixels. FxGrip keeps its cache in the document through `FxGripFrameData`; this tier needs no document state. It is off until an effect sets a byte limit.
+- Open: a Wraz server backend over HTTP, and interactive renders that return before the model finishes. The SHA-256 in `Digest` is portable code at about 200 MB/s; the CPU's SHA instructions would cut the disk tier's lookup cost.
 - Open: live hosts. No Windows or Linux machine with Resolve is known; no OpenFX host ships for Arm Linux.
 
 ## 4. Layout
@@ -126,7 +127,7 @@ OfxGrip/
                    Rules, Events, Extension, HostServices, HostProfile, Quirks, RenderSnapshot,
                    Image, Parameters, MetaManager, Preset, Presets, FrameData, I18n, About, Debug,
                    InstanceTracker, Regression, Kernel* (layout, metadata, tile, values, catalog),
-                   Overlay, Licensing, LicensingProviders, Watermark, Digest, Inference, and the framework
+                   Overlay, Licensing, LicensingProviders, Watermark, Digest, Inference, InferenceDiskCache, and the framework
                    extensions (Meta, Visibility, Versioning, Analysis, Licensing)
                    (GripTruck candidates, no OFX headers)
     ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,

@@ -34,6 +34,7 @@ add_executable(ofxgrip_core_tests
   core/FrameworkExtensionsTests.cpp
   core/KernelTests.cpp
   core/InferenceTests.cpp
+  core/InferenceDiskCacheTests.cpp
   core/OverlayTests.cpp
   core/WatermarkTests.cpp
   core/LicensingTests.cpp)

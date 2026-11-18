@@ -98,8 +98,8 @@ paraphrase their code. The official OpenFX headers are a separate case.
   `MetaManager`, `Preset`, `Presets`, `FrameData`, `I18n`, `About`, `Debug`, `InstanceTracker`,
   `Regression`, the kernel contract (`KernelLayout`, `KernelMetadata`, `KernelTile`,
   `KernelValues`, `KernelCatalog`), the overlay model (`Overlay`), licensing (`Licensing`,
-  `LicensingProviders`, `Watermark`, `Digest`), the inference seam (`Inference`), and the
-  framework extensions (`MetaExtension`,
+  `LicensingProviders`, `Watermark`, `Digest`), the inference seam (`Inference`,
+  `InferenceDiskCache`), and the framework extensions (`MetaExtension`,
   `VisibilityExtension`, `VersioningExtension`, `AnalysisExtension`). These are the GripTruck
   candidates.
 - `include/ofxgrip/ofx/` — the OpenFX adapter: `Suites`, `PropertySet`, `Actions`, `Descriptor`,
@@ -157,7 +157,8 @@ Rules of the layering:
   absence makes the backend unavailable. `scripts/validate-bundle.py` fails a Linux bundle that
   lists one among its load-time dependencies.
 - A model runs on an `InferenceRunner` thread. The render thread waits, polls the host's abort,
-  and reads the instance's `InferenceCache`.
+  and reads the instance's `InferenceCache`. The disk tier (`InferenceDiskCache`) keys an output
+  by the signature and the source pixels, never by a frame number or an instance.
 - A Metal render encodes on the host's queue and commits without waiting. The only process-wide
   state on a render path is the backend's cache of immutable pipelines and reusable scratch
   buffers, under a mutex.

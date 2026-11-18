@@ -13,6 +13,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 
 using namespace ofxgrip;
@@ -217,6 +219,108 @@ TEST_F(InferenceEffectTest, RendersTheBackendsOutputInEveryDepthAndCachesTheFram
 	// A null backend restores the passthrough.
 	gEffect->setInferenceBackend(nullptr);
 	EXPECT_EQ(gEffect->inferenceBackend()->identifier(), "passthrough");
+}
+
+TEST_F(InferenceEffectTest, TheDiskTierServesAStoredOutputAndRunsAgainForOtherPixels)
+{
+	auto dimmer = std::make_shared<Dimmer>();
+	start(dimmer);
+	const std::filesystem::path dir = std::filesystem::temp_directory_path() / "ofxgrip-inferenceeffect-disk";
+	std::error_code ec;
+	std::filesystem::remove_all(dir, ec);
+	EXPECT_EQ(gEffect->diskCache(), nullptr);
+	EXPECT_EQ(gEffect->diskCacheLimit(), 0u);
+	auto disk = std::make_shared<InferenceDiskCache>(dir, 1 << 20);
+	gEffect->setDiskCache(disk);
+	EXPECT_EQ(gEffect->diskCache(), disk);
+	EXPECT_EQ(gEffect->diskCacheLimit(), std::uint64_t{1} << 20);
+
+	RenderResult first = instance_->render(RenderRequest{});
+	ASSERT_TRUE(first.ok());
+	EXPECT_EQ(dimmer->runs.load(), 1);
+	EXPECT_EQ(disk->fileCount(), 1u);
+
+	// A restart of the host: the memory cache is empty and the folder still holds the output.
+	gEffect->inferenceCache().clear();
+	RenderResult second = instance_->render(RenderRequest{});
+	ASSERT_TRUE(second.ok());
+	EXPECT_EQ(dimmer->runs.load(), 1);
+	EXPECT_EQ(second.image.bytes(), first.image.bytes());
+	EXPECT_EQ(gEffect->inferenceCache().frameCount(), 1u);
+
+	// The same pixels at another time are the same input: no frame number takes part.
+	RenderRequest later;
+	later.time = 5;
+	ASSERT_TRUE(instance_->render(later).ok());
+	EXPECT_EQ(dimmer->runs.load(), 1);
+	EXPECT_EQ(disk->fileCount(), 1u);
+
+	// Other pixels are another input, although the frame and the signature are the same.
+	gEffect->inferenceCache().clear();
+	std::shared_ptr<ImageBuffer> changed = makeRampImage(32, 16, BitDepth::Float);
+	writeComponent(changed->view().pixel(20, 7), BitDepth::Float, 0, 0.9f);
+	instance_->setInput("Source", changed);
+	RenderResult third = instance_->render(RenderRequest{});
+	ASSERT_TRUE(third.ok());
+	EXPECT_EQ(dimmer->runs.load(), 2);
+	EXPECT_NEAR(at(third.image, 20, 7, 0), 0.45f, 0.01f);
+	EXPECT_EQ(disk->fileCount(), 2u);
+
+	// With the cache off the folder is neither read nor written.
+	gEffect->setCacheEnabled(false);
+	ASSERT_TRUE(instance_->render(RenderRequest{}).ok());
+	EXPECT_EQ(dimmer->runs.load(), 3);
+	EXPECT_EQ(disk->fileCount(), 2u);
+	gEffect->setCacheEnabled(true);
+
+	// A null tier turns the disk off.
+	gEffect->setDiskCache(nullptr);
+	EXPECT_EQ(gEffect->diskCacheLimit(), 0u);
+	gEffect->inferenceCache().clear();
+	ASSERT_TRUE(instance_->render(RenderRequest{}).ok());
+	EXPECT_EQ(dimmer->runs.load(), 4);
+	disk->clear();
+}
+
+TEST_F(InferenceEffectTest, ADiskLimitOpensTheFolderUnderThePlugInsCacheDirectory)
+{
+	auto dimmer = std::make_shared<Dimmer>();
+	start(dimmer);
+	gEffect->setDiskCacheLimit(1 << 20);
+	EXPECT_EQ(gEffect->diskCacheLimit(), std::uint64_t{1} << 20);
+	EXPECT_EQ(gEffect->diskCache(), nullptr);
+	ASSERT_TRUE(instance_->render(RenderRequest{}).ok());
+	const std::shared_ptr<InferenceDiskCache> disk = gEffect->diskCache();
+	ASSERT_NE(disk, nullptr);
+	EXPECT_EQ(disk->directory().filename().string(), "inference");
+	EXPECT_EQ(disk->byteLimit(), std::uint64_t{1} << 20);
+	EXPECT_GE(disk->fileCount(), 1u);
+	// The same limit keeps the open folder; another limit opens it again on the next render.
+	gEffect->setDiskCacheLimit(1 << 20);
+	EXPECT_EQ(gEffect->diskCache(), disk);
+	gEffect->setDiskCacheLimit(1 << 21);
+	EXPECT_EQ(gEffect->diskCache(), nullptr);
+	EXPECT_EQ(gEffect->diskCacheLimit(), std::uint64_t{1} << 21);
+	gEffect->setDiskCacheLimit(0);
+	EXPECT_EQ(gEffect->diskCacheLimit(), 0u);
+	disk->clear();
+}
+
+TEST_F(InferenceEffectTest, AFolderThatCannotBeWrittenStillRenders)
+{
+	auto dimmer = std::make_shared<Dimmer>();
+	start(dimmer);
+	const std::filesystem::path blocker = std::filesystem::temp_directory_path() / "ofxgrip-inferenceeffect-blocker";
+	{
+		std::ofstream out(blocker, std::ios::trunc);
+		out << "x";
+	}
+	// A folder under a regular file cannot be created on any platform.
+	gEffect->setDiskCache(std::make_shared<InferenceDiskCache>(blocker / "cache", 1 << 20));
+	RenderResult result = instance_->render(RenderRequest{});
+	ASSERT_TRUE(result.ok());
+	EXPECT_EQ(dimmer->runs.load(), 1);
+	EXPECT_EQ(gEffect->inferenceCache().frameCount(), 1u);
 }
 
 TEST_F(InferenceEffectTest, AnUnreadyBackendRendersTheSourceAndAResultOfAnotherSizeIsResampled)

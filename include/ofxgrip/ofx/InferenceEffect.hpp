@@ -15,14 +15,22 @@
 	tiles off. The render waits for the run and polls the host's abort; an aborted render
 	returns at once and the run still finishes into the cache.
 
+	A model that takes seconds per frame also keeps its outputs on disk. `setDiskCacheLimit`
+	turns the disk tier on. A render that misses the memory cache then looks the source frame up
+	in the folder before it runs the model, and a finished run is written there. The tier is
+	off by default: hashing the source and writing the output cost more than a fast model
+	saves.
+
 	The cache and the runner are per-instance state behind their own locks. They are the
 	inference counterpart of the GPU backends' pipeline cache: a render changes nothing else.
 */
 #pragma once
 
 #include <ofxgrip/core/Inference.hpp>
+#include <ofxgrip/core/InferenceDiskCache.hpp>
 #include <ofxgrip/ofx/Effect.hpp>
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -47,6 +55,16 @@ public:
 	void setCacheEnabled(bool enabled) noexcept { cacheEnabled_ = enabled; }
 	bool cacheEnabled() const noexcept { return cacheEnabled_; }
 	InferenceCache& inferenceCache() noexcept { return cache_; }
+	/*! The most bytes the disk tier keeps. Zero, the default, turns the tier off. The first
+	    render after a nonzero limit opens the folder `inference` under the plug-in's cache
+	    directory, which every instance of the plug-in shares. Introduced in OfxGrip 0.5.0. */
+	void setDiskCacheLimit(std::uint64_t bytes);
+	std::uint64_t diskCacheLimit() const;
+	/*! Sets the disk tier itself: a folder of the effect's choosing. Null with a zero limit
+	    turns the tier off. Introduced in OfxGrip 0.5.0. */
+	void setDiskCache(std::shared_ptr<InferenceDiskCache> cache);
+	/*! The disk tier, or null while it is off or no render has opened it. */
+	std::shared_ptr<InferenceDiskCache> diskCache() const;
 
 	/*! The request input the source image goes under. Default `image`. */
 	virtual std::string inputImageName() const { return "image"; }
@@ -62,7 +80,10 @@ public:
 private:
 	mutable std::mutex mutex_;
 	std::shared_ptr<InferenceBackend> backend_;
+	std::shared_ptr<InferenceDiskCache> diskTier(HostServices& services);
 	bool cacheEnabled_{true};
+	std::uint64_t diskLimit_{0};
+	std::shared_ptr<InferenceDiskCache> disk_;
 	InferenceCache cache_;
 	InferenceRunner runner_;
 };

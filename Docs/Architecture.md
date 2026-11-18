@@ -64,7 +64,7 @@ Date: 2026-10-15. Phase 3.
    Overlay (parts, composites, the parameters seam, draw kits)
    Licensing (statuses, entitlement, provider, registry, extension) · LicensingProviders
    (static, trial, file) · Watermark · Digest (SHA-256, HMAC)
-   Inference (request, result, backend, passthrough, frame cache, runner)
+   Inference (request, result, backend, passthrough, frame cache, runner) · InferenceDiskCache
    HostProfile + Quirks (registry table) · RenderSnapshot (+ codec) · Image (CPU, GpuImage)
  ────────────────────────────────────────────────────────────────────────────────────────────────
  Hosts: DaVinci Resolve (live, macOS), the mini host (CI on macOS and Linux; CPU, Metal, and
@@ -245,6 +245,15 @@ scalar parameters in, named outputs out, synchronously. The framework links no e
 abort; an aborted call returns at once and the run still completes. `InferenceCache` keeps each
 frame's output under a signature (the backend, the render scale, the frame's parameters); a new
 signature clears it, and the least recently used frames leave past the byte limit.
+`InferenceDiskCache` is the disk tier. It keeps one file per output, named by the SHA-256 of the
+signature and of the source image's description and pixels. The same model, parameters, and
+input pixels give the same key in any instance, document, or process, so an output survives a
+restart of the host, a copied effect reuses it, and it is never served for other pixels. A file
+is written under a temporary name and renamed into place. The least recently used files leave
+past the folder's byte limit. An effect turns the tier on with `setDiskCacheLimit`; the folder
+is `inference` under the plug-in's cache directory. The tier is off by default, because
+hashing the source (about 0.2 s for an HD float frame) and writing the output cost more than a
+fast model saves.
 `InferenceEffect` is the effect template: cache, source → request → runner → output →
 destination, with the output converted to the destination's depth and layout and resampled when
 the model returns another size. `InferKitBackend` adapts InferKit's C interface, opened from a
