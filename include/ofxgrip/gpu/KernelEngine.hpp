@@ -72,12 +72,27 @@ public:
 	virtual bool available() const noexcept = 0;
 	/*! Runs a dispatch. A GPU backend encodes on the host's queue and returns without waiting. */
 	virtual Error dispatch(const KernelDispatch& dispatch) = 0;
+	/*! Drops what the backend holds on a device or a driver: compiled programs, modules, a
+	    device of its own. A later dispatch builds them again. Called when no dispatch is in
+	    flight. The default holds nothing.
+	    Introduced in OfxGrip 0.5.0. */
+	virtual void releaseDeviceState() {}
 };
 
-/*! The engine. One per process; backends register once. */
+/*! The engine. One per process; backends register once.
+
+    The shared engine is never destroyed. A plug-in's static destructors run while the
+    operating system unloads the binary (under the loader lock on Windows), and a GPU driver
+    called there can wait forever. The adapter calls `releaseDeviceState` from the unload action
+    instead, which runs before the binary is unloaded.
+
+    The backend table has no lock. Backends register from the load action and are released from
+    the unload action, and neither runs beside a render. */
 class KernelEngine {
 public:
 	static KernelEngine& shared();
+	/*! Has every backend drop its device state. Introduced in OfxGrip 0.5.0. */
+	void releaseDeviceState();
 	/*! Registers a backend for its API, replacing an earlier one. */
 	void registerBackend(std::unique_ptr<KernelBackend> backend);
 	KernelBackend* backend(GpuApi api) const noexcept;

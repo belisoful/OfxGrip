@@ -106,10 +106,10 @@ function(ofxgrip_add_kernels)
     configure_file("${PROJECT_SOURCE_DIR}/cmake/KernelAdapter.cpp.in" "${_adapter}" @ONLY)
     target_sources(${OGK_TARGET} PRIVATE "${_adapter}")
     set_source_files_properties("${_adapter}" PROPERTIES OBJECT_DEPENDS "${_cpp}")
-    # The emitted C++ is generated code: it compiles without the project's warning set.
-    if(MSVC)
-      set_source_files_properties("${_adapter}" PROPERTIES COMPILE_OPTIONS "/w")
-    else()
+    # The emitted C++ is generated code: it compiles without the project's warning set. On MSVC
+    # the adapter silences it with a pragma, because /w after /W4 draws command-line warning
+    # D9025.
+    if(NOT MSVC)
       set_source_files_properties("${_adapter}" PROPERTIES COMPILE_OPTIONS "-w")
     endif()
     target_link_libraries(${OGK_TARGET} PRIVATE OfxGrip::kernels)

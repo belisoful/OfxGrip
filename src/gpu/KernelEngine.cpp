@@ -13,8 +13,15 @@ KernelEngine::KernelEngine()
 
 KernelEngine& KernelEngine::shared()
 {
-	static KernelEngine engine;
-	return engine;
+	static KernelEngine* engine = new KernelEngine;
+	return *engine;
+}
+
+void KernelEngine::releaseDeviceState()
+{
+	for (const auto& [api, backend] : backends_) {
+		backend->releaseDeviceState();
+	}
 }
 
 void KernelEngine::registerBackend(std::unique_ptr<KernelBackend> backend)

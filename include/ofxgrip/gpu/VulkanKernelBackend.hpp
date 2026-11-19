@@ -31,6 +31,8 @@ public:
 	/*! Runs the kernel over the window. The destination and every source must be CPU views, and
 	    the layout must be the SPIR-V target's descriptor layout. */
 	Error dispatch(const KernelDispatch& dispatch) override;
+	/*! Lets go of the process's Vulkan device (`VulkanContext::releaseShared`). */
+	void releaseDeviceState() override;
 	/*! Registers the backend with `KernelEngine::shared()`. Idempotent. Opens no device. */
 	static void registerWithEngine();
 };

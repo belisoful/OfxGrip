@@ -55,7 +55,9 @@ Code is commit-ready only when every check below passes.
    the Rust bundle through the mini host), when the change touches the C contract or `rust/`
 
 CI also builds and tests on Linux (`ubuntu-24.04`) and on Windows (`windows-2025`, MSVC). Both
-jobs block. Read the CI run after every push. A change to platform code, a GPU
+jobs block. Read the CI run after every push. The CI runners have no GPU, so a change to a GPU
+backend or to plug-in loading is also tested on the Windows machine with an NVIDIA card
+(`Docs/Testing.md`). A change to platform code, a GPU
 backend, or the build files is also built and tested with GCC in the local Linux virtual machine
 before a commit:
 
@@ -156,6 +158,10 @@ Rules of the layering:
   the CUDA driver, InferKit, and OpenGL on Linux) is opened at run time, never linked. Its
   absence makes the backend unavailable. `scripts/validate-bundle.py` fails a Linux bundle that
   lists one among its load-time dependencies.
+- No static destructor calls a GPU driver: it would run while the operating system unloads the
+  plug-in, and the driver can wait forever (the NVIDIA Vulkan driver does on Windows). Shared
+  device state lives in an object that is never destroyed, and a backend releases it in
+  `KernelBackend::releaseDeviceState`, which the adapter calls on the last unload action.
 - A model runs on an `InferenceRunner` thread. The render thread waits, polls the host's abort,
   and reads the instance's `InferenceCache`. The disk tier (`InferenceDiskCache`) keys an output
   by the signature and the source pixels, never by a frame number or an instance.

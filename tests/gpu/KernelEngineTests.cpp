@@ -149,6 +149,38 @@ KernelValueMap inspectValues(int mode)
 
 }  // namespace
 
+namespace {
+
+/*! A backend that counts the release calls it gets. */
+class CountingBackend final : public KernelBackend {
+public:
+	explicit CountingBackend(int& releases) : releases_(releases) {}
+	GpuApi api() const noexcept override { return GpuApi::D3D12; }
+	bool available() const noexcept override { return false; }
+	Error dispatch(const KernelDispatch&) override { return Error::none(); }
+	void releaseDeviceState() override { ++releases_; }
+
+private:
+	int& releases_;
+};
+
+}  // namespace
+
+TEST(KernelEngine, ReleasingTheDeviceStateReachesEveryBackend)
+{
+	static int releases = 0;
+	KernelEngine& engine = KernelEngine::shared();
+	EXPECT_EQ(&KernelEngine::shared(), &engine);
+	engine.registerBackend(std::make_unique<CountingBackend>(releases));
+	engine.releaseDeviceState();
+	EXPECT_EQ(releases, 1);
+	// The CPU backend holds nothing and still renders.
+	engine.releaseDeviceState();
+	EXPECT_EQ(releases, 2);
+	ASSERT_NE(engine.backend(GpuApi::None), nullptr);
+	EXPECT_TRUE(engine.backend(GpuApi::None)->available());
+}
+
 TEST(KernelEngine, RegistersTheCpuBackendAndRefusesIncompleteDispatches)
 {
 	KernelEngine& engine = KernelEngine::shared();

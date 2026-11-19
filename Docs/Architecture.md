@@ -280,6 +280,15 @@ pixel-buffer output becomes an image with the bottom row first.
   cannot open the library declares no OpenCL render to a host that offers one, so the host
   hands it CPU frames.
 - macOS and Windows ship OpenGL with the system, so the adapter links it there.
+- No static destructor calls a GPU driver. A plug-in's static destructors run while the
+  operating system unloads the binary, under the loader lock on Windows, and a driver called
+  there can wait forever: the NVIDIA Vulkan driver never returns from destroying a device. The
+  shared kernel engine, the shared Vulkan device, and the OpenCL contexts live in objects that
+  are never destroyed. The adapter counts the binary's loaded plug-ins and, on the last unload
+  action, calls `KernelEngine::releaseDeviceState` and `OpenCLContext::releaseAll`. The
+  Vulkan backend lets go of its device, the CUDA backend unloads its modules, and the OpenCL
+  contexts release their programs, buffers, and queues. A later load opens everything again.
+  A host that skips the unload action leaves the state to the process's end.
 
 ## Overlays (phase 3)
 

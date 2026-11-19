@@ -8,8 +8,8 @@
 	Introduced in OfxGrip 0.4.0. Slang emits no OpenCL C, so an OpenCL path takes native kernels
 	(host libraries plan, section 10). The OpenFX contract (`ofxGPURender.h`): the host passes
 	`cl_mem` frames and its own `cl_command_queue`; the plug-in enqueues on that queue and
-	returns without waiting. `OpenCLContext::forQueue` keeps one context per queue for the life
-	of the process, so compiled programs and pooled scratch buffers are shared by every instance
+	returns without waiting. `OpenCLContext::forQueue` keeps one context per queue until the
+	plug-in unloads, so compiled programs and pooled scratch buffers are shared by every instance
 	that renders on it. Every type here is opaque; nothing in this header includes an OpenCL
 	header.
 
@@ -105,13 +105,19 @@ public:
 	    path tries the default names. The process's runtime is unchanged. Tests use it to cover
 	    the failure paths. Introduced in OfxGrip 0.5.0. */
 	static Error probeRuntime(const std::string& libraryPath);
-	/*! The context for a host's `cl_command_queue`. One per queue for the process lifetime; null
-	    for a null queue and without the OpenCL library. */
+	/*! The context for a host's `cl_command_queue`. One per queue until `releaseAll`; null for a
+	    null queue and without the OpenCL library. */
 	static std::shared_ptr<OpenCLContext> forQueue(void* commandQueue);
 	/*! A context over the first GPU device and a queue the backend owns, for hosts and tests.
 	    Off macOS, the first CPU device serves when no GPU has an OpenCL driver. One per process.
 	    Null without a device. */
 	static std::shared_ptr<OpenCLContext> systemDefault();
+	/*! Lets go of every context, the system default included. A context is destroyed when its
+	    last holder drops it, and the next `forQueue` or `systemDefault` makes one again. The
+	    adapter calls this from the unload action: OpenCL objects are never released from a
+	    static destructor, because a driver called while the operating system unloads the
+	    plug-in can wait forever. Introduced in OfxGrip 0.5.0. */
+	static void releaseAll();
 
 	void* queue() const noexcept;
 	void* context() const noexcept;

@@ -141,6 +141,39 @@ TEST(VulkanBackend, SharedDeviceReportsWhatItOpened)
 	RecordProperty("device", context->info().name);
 }
 
+TEST(VulkanBackend, AReleasedSharedDeviceOpensAgain)
+{
+	std::shared_ptr<VulkanContext> first = VulkanContext::shared();
+	if (!first) {
+		// The release forgets the failure too, and the next call tries again.
+		VulkanContext::releaseShared();
+		EXPECT_TRUE(VulkanContext::unavailableReason().empty());
+		EXPECT_EQ(VulkanContext::shared(), nullptr);
+		EXPECT_FALSE(VulkanContext::unavailableReason().empty());
+		GTEST_SKIP() << "No Vulkan device";
+	}
+	FillJob before(4, 4, 0.5f);
+	ASSERT_TRUE(first->run(before.job).ok());
+	VulkanContext::releaseShared();
+	// A holder keeps the released device alive and usable.
+	FillJob held(4, 4, 0.25f);
+	ASSERT_TRUE(first->run(held.job).ok());
+	EXPECT_FLOAT_EQ(held.destination[0], 0.25f);
+
+	std::shared_ptr<VulkanContext> second = VulkanContext::shared();
+	ASSERT_NE(second, nullptr);
+	EXPECT_NE(second, first);
+	EXPECT_EQ(second->cachedPipelineCount(), 0u);
+	FillJob after(4, 4, 0.75f);
+	ASSERT_TRUE(second->run(after.job).ok());
+	EXPECT_FLOAT_EQ(after.destination[0], 0.75f);
+	EXPECT_EQ(VulkanContext::shared(), second);
+
+	VulkanContext::releaseShared();
+	VulkanContext::releaseShared();
+	EXPECT_TRUE(VulkanContext::available());
+}
+
 TEST(VulkanBackend, RunsAJobAndCachesItsPipeline)
 {
 	std::shared_ptr<VulkanContext> context = VulkanContext::shared();

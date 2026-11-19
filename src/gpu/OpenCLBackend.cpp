@@ -179,16 +179,20 @@ Error clError(cl_int status, const char* what)
 	return Error::make(ErrorCode::Render, std::string("OpenCL: ") + what + " failed", "status " + std::to_string(status));
 }
 
-std::mutex& registryMutex()
-{
-	static std::mutex m;
-	return m;
-}
+/*! The contexts of the process: one per command queue, and the system default. Never
+    destroyed: a static destructor here would release OpenCL objects while the operating system
+    unloads the plug-in, and a driver called there can wait forever. `releaseAll` empties it. */
+struct Registry {
+	std::mutex mutex;
+	std::map<void*, std::shared_ptr<OpenCLContext>> contexts;
+	bool defaultOpened{false};
+	std::shared_ptr<OpenCLContext> systemDefault;
+};
 
-std::map<void*, std::shared_ptr<OpenCLContext>>& contexts()
+Registry& registry()
 {
-	static std::map<void*, std::shared_ptr<OpenCLContext>> table;
-	return table;
+	static Registry* shared = new Registry;
+	return *shared;
 }
 
 /*! The first GPU device of any platform. Off macOS, the first CPU device when no GPU has a
@@ -347,54 +351,71 @@ std::shared_ptr<OpenCLContext> OpenCLContext::forQueue(void* commandQueue)
 	if (commandQueue == nullptr || !runtime().loaded) {
 		return nullptr;
 	}
-	std::lock_guard<std::mutex> lock(registryMutex());
-	std::shared_ptr<OpenCLContext>& entry = contexts()[commandQueue];
-	if (!entry) {
-		auto queue = static_cast<cl_command_queue>(commandQueue);
-		cl_context context = nullptr;
-		cl_device_id device = nullptr;
-		if (cl().clGetCommandQueueInfo(queue, CL_QUEUE_CONTEXT, sizeof context, &context, nullptr) != CL_SUCCESS || cl().clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof device, &device, nullptr) != CL_SUCCESS) {
-			contexts().erase(commandQueue);
-			return nullptr;
-		}
-		std::shared_ptr<OpenCLContext> made(new OpenCLContext());
-		cl().clRetainCommandQueue(queue);
-		cl().clRetainContext(context);
-		made->impl_->queue = queue;
-		made->impl_->context = context;
-		made->impl_->device = device;
-		entry = made;
+	Registry& all = registry();
+	std::lock_guard<std::mutex> lock(all.mutex);
+	if (auto it = all.contexts.find(commandQueue); it != all.contexts.end()) {
+		return it->second;
 	}
-	return entry;
+	auto queue = static_cast<cl_command_queue>(commandQueue);
+	cl_context context = nullptr;
+	cl_device_id device = nullptr;
+	if (cl().clGetCommandQueueInfo(queue, CL_QUEUE_CONTEXT, sizeof context, &context, nullptr) != CL_SUCCESS || cl().clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof device, &device, nullptr) != CL_SUCCESS) {
+		return nullptr;
+	}
+	std::shared_ptr<OpenCLContext> made(new OpenCLContext());
+	cl().clRetainCommandQueue(queue);
+	cl().clRetainContext(context);
+	made->impl_->queue = queue;
+	made->impl_->context = context;
+	made->impl_->device = device;
+	all.contexts[commandQueue] = made;
+	return made;
 }
 
 std::shared_ptr<OpenCLContext> OpenCLContext::systemDefault()
 {
-	static std::shared_ptr<OpenCLContext> context = []() -> std::shared_ptr<OpenCLContext> {
-		cl_device_id device = firstDevice();
-		if (device == nullptr) {
-			return nullptr;
-		}
-		cl_int status = CL_SUCCESS;
-		cl_context ctx = cl().clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
-		if (ctx == nullptr) {
-			return nullptr;
-		}
-		cl_command_queue queue = cl().clCreateCommandQueue(ctx, device, 0, &status);
-		if (queue == nullptr) {
-			cl().clReleaseContext(ctx);
-			return nullptr;
-		}
-		std::shared_ptr<OpenCLContext> made(new OpenCLContext());
-		made->impl_->queue = queue;
-		made->impl_->context = ctx;
-		made->impl_->device = device;
-		made->impl_->ownsQueue = true;
-		std::lock_guard<std::mutex> lock(registryMutex());
-		contexts()[queue] = made;
-		return made;
-	}();
-	return context;
+	Registry& all = registry();
+	std::lock_guard<std::mutex> lock(all.mutex);
+	if (all.defaultOpened) {
+		return all.systemDefault;
+	}
+	all.defaultOpened = true;
+	cl_device_id device = firstDevice();
+	if (device == nullptr) {
+		return nullptr;
+	}
+	cl_int status = CL_SUCCESS;
+	cl_context ctx = cl().clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
+	if (ctx == nullptr) {
+		return nullptr;
+	}
+	cl_command_queue queue = cl().clCreateCommandQueue(ctx, device, 0, &status);
+	if (queue == nullptr) {
+		cl().clReleaseContext(ctx);
+		return nullptr;
+	}
+	std::shared_ptr<OpenCLContext> made(new OpenCLContext());
+	made->impl_->queue = queue;
+	made->impl_->context = ctx;
+	made->impl_->device = device;
+	made->impl_->ownsQueue = true;
+	all.contexts[queue] = made;
+	all.systemDefault = made;
+	return made;
+}
+
+void OpenCLContext::releaseAll()
+{
+	Registry& all = registry();
+	std::map<void*, std::shared_ptr<OpenCLContext>> released;
+	std::shared_ptr<OpenCLContext> releasedDefault;
+	{
+		std::lock_guard<std::mutex> lock(all.mutex);
+		released.swap(all.contexts);
+		releasedDefault = std::move(all.systemDefault);
+		all.systemDefault.reset();
+		all.defaultOpened = false;
+	}
 }
 
 void* OpenCLContext::queue() const noexcept

@@ -37,6 +37,11 @@ bool VulkanKernelBackend::available() const noexcept
 	return vulkan::VulkanContext::available();
 }
 
+void VulkanKernelBackend::releaseDeviceState()
+{
+	vulkan::VulkanContext::releaseShared();
+}
+
 void VulkanKernelBackend::registerWithEngine()
 {
 	static std::once_flag once;

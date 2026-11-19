@@ -2,6 +2,11 @@
 // The kernel's emitted C++ is compiled here against the vendored Slang prelude, with its entry
 // symbols renamed per kernel and kept inside the binary, the entry adapted to the CPU backend's
 // signature, and the kernel's sources embedded as byte arrays.
+// The prelude and the emitted C++ are generated code and compile without the project's warning
+// set. MSVC takes that from the pragma; the other compilers take -w from the build.
+#if defined(_MSC_VER)
+#pragma warning(push, 0)
+#endif
 #include <slang-cpp-prelude.h>
 
 #undef SLANG_PRELUDE_SHARED_LIB_EXPORT
@@ -12,6 +17,9 @@
 #define _@OFXGRIP_KERNEL_ENTRY@ ofxgrip_kernel_@OFXGRIP_KERNEL_NAME@_impl
 
 #include "@OFXGRIP_KERNEL_CPP@"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include <ofxgrip/gpu/KernelCpu.hpp>
 

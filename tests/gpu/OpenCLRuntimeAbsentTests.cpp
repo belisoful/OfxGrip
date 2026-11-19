@@ -33,6 +33,8 @@ TEST(OpenCLRuntimeAbsent, TheBackendReportsItselfUnavailable)
 	int notAQueue = 0;
 	EXPECT_EQ(OpenCLContext::forQueue(&notAQueue), nullptr);
 	EXPECT_EQ(OpenCLContext::probeRuntime({}).code(), ErrorCode::MissingHostFeature);
+	OpenCLContext::releaseAll();
+	EXPECT_EQ(OpenCLContext::systemDefault(), nullptr);
 }
 
 TEST(OpenCLRuntimeAbsent, AnOpenCLHostGetsCpuRendersFromThePlugIn)

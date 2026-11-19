@@ -570,10 +570,20 @@ TEST_F(CudaBackend, BindsTheGlobalsLaunchesAndStoresTheWindow)
 		EXPECT_EQ(backend.cachedModuleCount(), 3u);
 		fake_.current = first1000;
 		EXPECT_EQ(fake_.unloads, 0);
+
+		// Releasing the device state unloads the modules of the context that is current, and
+		// leaves the others to their context. The next dispatch loads its module again.
+		backend.releaseDeviceState();
+		EXPECT_EQ(fake_.unloads, 2);
+		EXPECT_EQ(backend.cachedModuleCount(), 0u);
+		backend.releaseDeviceState();
+		EXPECT_EQ(fake_.unloads, 2);
+		ASSERT_TRUE(backend.dispatch(d).ok());
+		EXPECT_EQ(fake_.images.size(), 4u);
+		EXPECT_EQ(backend.cachedModuleCount(), 1u);
 	}
-	// The backend unloads the modules of the context that is current, and leaves the others to
-	// their context.
-	EXPECT_EQ(fake_.unloads, 2);
+	// The backend's end releases what is left.
+	EXPECT_EQ(fake_.unloads, 3);
 }
 
 TEST_F(CudaBackend, BindsAMisalignedFrameThroughAnArray)

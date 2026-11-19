@@ -8,6 +8,11 @@
 #include <ofxgrip/ofx/Interact.hpp>
 #include <ofxgrip/ofx/ResolveExtensions.hpp>
 
+#include <ofxgrip/gpu/KernelEngine.hpp>
+#if defined(OFXGRIP_HAS_OPENCL)
+#include <ofxgrip/gpu/OpenCLBackend.hpp>
+#endif
+
 #include "ofxGPURender.h"
 #include "ofxImageEffect.h"
 #include "ofxInteract.h"
@@ -20,6 +25,25 @@
 #include <utility>
 
 OFXGRIP_NAMESPACE_BEGIN
+
+namespace {
+
+/*! The plug-ins of this binary that are between their load and unload actions. */
+std::atomic<int> loadedPlugins{0};
+
+/*! Lets go of every device, context, and compiled program the binary's backends hold. The
+    unload action is the last call before the host unloads the binary, and the only safe place
+    for it: a static destructor runs while the operating system unloads the binary, and a GPU
+    driver called there can wait forever. */
+void releaseGpuState()
+{
+	KernelEngine::shared().releaseDeviceState();
+#if defined(OFXGRIP_HAS_OPENCL)
+	opencl::OpenCLContext::releaseAll();
+#endif
+}
+
+}  // namespace
 
 namespace detail {
 
@@ -61,6 +85,14 @@ MainEntryFn mainEntryTrampoline(int index) noexcept
     for it across actions. */
 class PluginSlot {
 public:
+	~PluginSlot()
+	{
+		// A slot that ends loaded belongs to a host that skipped the unload action. It leaves
+		// the device state alone, because this can be a static destructor.
+		if (loaded_) {
+			loadedPlugins.fetch_sub(1);
+		}
+	}
 	/*! `major` is 0 for the current version; a deprecated major gets its own slot whose manifest
 	    carries that major and no deprecation list. */
 	PluginSlot(int index, std::shared_ptr<EffectFactory> factory, unsigned major)
@@ -327,6 +359,9 @@ private:
 		buildProfile();
 		logger_.info("Loaded " + identifier_ + " " + manifest_.version.toString() + " in host\n" + profile_.describe());
 		factory_->onLoad(profile_, logger_);
+		if (!loaded_) {
+			loadedPlugins.fetch_add(1);
+		}
 		loaded_ = true;
 		return kOfxStatOK;
 	}
@@ -335,6 +370,9 @@ private:
 	{
 		if (loaded_) {
 			factory_->onUnload();
+			if (loadedPlugins.fetch_sub(1) == 1) {
+				releaseGpuState();
+			}
 		}
 		loaded_ = false;
 		return kOfxStatOK;

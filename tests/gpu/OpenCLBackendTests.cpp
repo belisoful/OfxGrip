@@ -92,6 +92,33 @@ TEST(OpenCLBackend, SystemDefaultContextIsSharedAndDescribed)
 	EXPECT_EQ(OpenCLContext::forQueue(nullptr), nullptr);
 }
 
+TEST(OpenCLBackend, ReleasedContextsAreMadeAgain)
+{
+	OFXGRIP_OPENCL_OR_SKIP();
+	OpenCLKernel kernel;
+	ASSERT_TRUE(context->kernel("ofxgrip.tests.release", kSource, "fillIndex", kernel).ok());
+	EXPECT_GE(context->programCount(), 1u);
+	OpenCLContext::releaseAll();
+	// A holder keeps a released context alive and usable.
+	EXPECT_TRUE(context->finish().ok());
+
+	std::shared_ptr<OpenCLContext> again = OpenCLContext::systemDefault();
+	ASSERT_NE(again, nullptr);
+	EXPECT_NE(again, context);
+	EXPECT_EQ(again->programCount(), 0u);
+	EXPECT_EQ(OpenCLContext::forQueue(again->queue()), again);
+	// The released context's queue is adopted as a host's queue is.
+	std::shared_ptr<OpenCLContext> adopted = OpenCLContext::forQueue(context->queue());
+	ASSERT_NE(adopted, nullptr);
+	EXPECT_NE(adopted, context);
+	EXPECT_EQ(adopted->queue(), context->queue());
+	EXPECT_EQ(OpenCLContext::forQueue(context->queue()), adopted);
+
+	OpenCLContext::releaseAll();
+	OpenCLContext::releaseAll();
+	EXPECT_NE(OpenCLContext::systemDefault(), nullptr);
+}
+
 TEST(OpenCLBackend, CompilesCachesAndDispatchesAKernel)
 {
 	OFXGRIP_OPENCL_OR_SKIP();

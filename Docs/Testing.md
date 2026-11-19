@@ -89,8 +89,13 @@ pocl's CPU device, so neither needs a GPU. The build takes the OpenCL headers fr
 test resolve the system table; that test is skipped without it. macOS takes a GPU OpenCL device or none: Apple's CPU
 device, which an x86_64 process sees under Rosetta, refuses a kernel with a struct argument.
 
-The Windows build runs only in CI (`windows-2025`, MSVC). No Windows machine is available
-locally, so a push is the first time MSVC compiles a change.
+The Windows build runs in CI (`windows-2025`, MSVC) on a runner with no GPU and no OpenCL
+headers. A Windows 10 machine with an NVIDIA RTX card runs the same presets on real hardware:
+`cmake --preset windows` inside the Visual Studio x64 environment, and a second build with
+`-DOFXGRIP_OPENCL_INCLUDE_DIR` set to the CUDA toolkit's `include` folder, which holds
+`CL/cl.h`. There the Vulkan and OpenCL tests run on the card. The bundle tests load and unload
+real plug-in binaries, which is where a driver call from a static destructor shows up: the test
+never returns.
 
 ## Backends without their hardware
 

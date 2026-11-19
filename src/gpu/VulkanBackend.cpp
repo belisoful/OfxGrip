@@ -839,15 +839,18 @@ VulkanContext::~VulkanContext() = default;
 namespace {
 
 struct SharedDevice {
-	std::once_flag once;
+	std::mutex mutex;
+	bool opened{false};
 	std::shared_ptr<VulkanContext> context;
 	std::string reason;
 };
 
 SharedDevice& sharedDevice()
 {
-	static SharedDevice device;
-	return device;
+	// Never destroyed: a static destructor here would destroy the device while the operating
+	// system unloads the plug-in, and the NVIDIA driver never returns from that on Windows.
+	static SharedDevice* device = new SharedDevice;
+	return *device;
 }
 
 }  // namespace
@@ -865,12 +868,27 @@ Error VulkanContext::open(const std::string& libraryPath, std::shared_ptr<Vulkan
 std::shared_ptr<VulkanContext> VulkanContext::shared()
 {
 	SharedDevice& device = sharedDevice();
-	std::call_once(device.once, [&device]() {
+	std::lock_guard<std::mutex> lock(device.mutex);
+	if (!device.opened) {
+		device.opened = true;
 		if (Error e = open(std::string(), device.context)) {
 			device.reason = e.describe();
 		}
-	});
+	}
 	return device.context;
+}
+
+void VulkanContext::releaseShared()
+{
+	SharedDevice& device = sharedDevice();
+	std::shared_ptr<VulkanContext> released;
+	{
+		std::lock_guard<std::mutex> lock(device.mutex);
+		released = std::move(device.context);
+		device.context.reset();
+		device.reason.clear();
+		device.opened = false;
+	}
 }
 
 bool VulkanContext::available() noexcept
@@ -884,7 +902,9 @@ bool VulkanContext::available() noexcept
 
 std::string VulkanContext::unavailableReason()
 {
-	return sharedDevice().reason;
+	SharedDevice& device = sharedDevice();
+	std::lock_guard<std::mutex> lock(device.mutex);
+	return device.reason;
 }
 
 const VulkanDeviceInfo& VulkanContext::info() const noexcept

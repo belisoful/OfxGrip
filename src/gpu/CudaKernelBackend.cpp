@@ -157,9 +157,15 @@ CudaKernelBackend::CudaKernelBackend(const CudaDriver* driver) : impl_(std::make
 
 CudaKernelBackend::~CudaKernelBackend()
 {
+	releaseDeviceState();
+}
+
+void CudaKernelBackend::releaseDeviceState()
+{
 	if (impl_->driver == nullptr) {
 		return;
 	}
+	std::lock_guard<std::mutex> lock(impl_->mutex);
 	// A module unloads only inside its own context; a context that is gone took its modules.
 	void* current = nullptr;
 	impl_->driver->ctxGetCurrent(&current);
@@ -168,6 +174,7 @@ CudaKernelBackend::~CudaKernelBackend()
 			impl_->driver->moduleUnload(module->module);
 		}
 	}
+	impl_->modules.clear();
 }
 
 bool CudaKernelBackend::available() const noexcept

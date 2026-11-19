@@ -2,6 +2,7 @@
 // Copyright © 2026 Belisoful
 // In-process adapter tests: a test effect registered with the PluginRegistry is driven through
 // the mini host, so every action, service, and quirk path runs without a bundle on disk.
+#include <ofxgrip/gpu/KernelEngine.hpp>
 #include <ofxgrip/minihost/MiniHost.hpp>
 #include <ofxgrip/ofx/Descriptor.hpp>
 #include <ofxgrip/ofx/Plugin.hpp>
@@ -211,6 +212,54 @@ protected:
 };
 
 }  // namespace
+
+namespace {
+
+/*! A backend that counts the release calls it gets. */
+class CountingBackend final : public KernelBackend {
+public:
+	explicit CountingBackend(int& releases) : releases_(releases) {}
+	GpuApi api() const noexcept override { return GpuApi::D3D11; }
+	bool available() const noexcept override { return false; }
+	Error dispatch(const KernelDispatch&) override { return Error::none(); }
+	void releaseDeviceState() override { ++releases_; }
+
+private:
+	int& releases_;
+};
+
+}  // namespace
+
+TEST_F(Fixture, TheLastUnloadReleasesTheBackendsDeviceState)
+{
+	static int releases = 0;
+	releases = 0;
+	KernelEngine::shared().registerBackend(std::make_unique<CountingBackend>(releases));
+	EffectManifest sibling = testManifest();
+	sibling.identity.ofxId = "com.belisoful.ofxgrip.test.sibling";
+	sibling.identity.uuid = "99999999-9999-4999-8999-999999999999";
+	const int second = PluginRegistry::instance().registerFactory(std::make_unique<EffectFactoryFor<TestEffect>>(sibling));
+	ASSERT_GE(second, 0);
+
+	MiniHost first(HostOptions::spec());
+	MiniHost other(HostOptions::spec());
+	ASSERT_EQ(first.load(plugin_, "/tmp/test.ofx.bundle"), kOfxStatOK);
+	ASSERT_EQ(other.load(PluginRegistry::instance().plugin(second), "/tmp/test.ofx.bundle"), kOfxStatOK);
+	// A second load of a loaded plug-in counts once.
+	ASSERT_EQ(first.load(plugin_, "/tmp/test.ofx.bundle"), kOfxStatOK);
+	first.unload();
+	EXPECT_EQ(releases, 0);
+	// An unload with no load before it changes nothing.
+	first.unload();
+	EXPECT_EQ(releases, 0);
+	other.unload();
+	EXPECT_EQ(releases, 1);
+
+	// The backends build their state again for the next load, and release it again.
+	ASSERT_EQ(first.load(plugin_, "/tmp/test.ofx.bundle"), kOfxStatOK);
+	first.unload();
+	EXPECT_EQ(releases, 2);
+}
 
 TEST_F(Fixture, RegistryFillsThePluginRecord)
 {

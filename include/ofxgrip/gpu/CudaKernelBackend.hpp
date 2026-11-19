@@ -56,6 +56,9 @@ public:
 	Error dispatch(const KernelDispatch& dispatch) override;
 	/*! The number of loaded modules the backend holds. */
 	std::size_t cachedModuleCount() const;
+	/*! Unloads the modules of the current context and forgets every module. A module of
+	    another context goes with that context. */
+	void releaseDeviceState() override;
 	/*! Registers the backend with `KernelEngine::shared()`. Idempotent. */
 	static void registerWithEngine();
 

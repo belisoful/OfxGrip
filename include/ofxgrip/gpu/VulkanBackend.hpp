@@ -86,8 +86,13 @@ public:
 	VulkanContext& operator=(const VulkanContext&) = delete;
 
 	/*! The process's device, or null when no loader, no driver, or no compute queue exists.
-	    The outcome of the first call is kept. */
+	    The outcome of the first call is kept until `releaseShared`. */
 	static std::shared_ptr<VulkanContext> shared();
+	/*! Lets go of the process's device. It is destroyed when its last holder drops it, and the
+	    next `shared()` opens a device again. The adapter calls this from the unload action: the
+	    device is never destroyed from a static destructor, because a driver called while the
+	    operating system unloads the plug-in can wait forever. Introduced in OfxGrip 0.5.0. */
+	static void releaseShared();
 	/*! Whether `shared()` returns a device. */
 	static bool available() noexcept;
 	/*! Why `shared()` returned null; empty when a device is open or was never asked for. */
