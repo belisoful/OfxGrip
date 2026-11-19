@@ -25,7 +25,7 @@ OfxStatus PropSet::set(const std::string& name, int index, T value)
 }
 
 template <typename T>
-OfxStatus PropSet::get(const std::string& name, int index, T& out) const
+OfxStatus PropSet::get(const std::string& name, int index, T& out, bool exact) const
 {
 	std::lock_guard<std::mutex> lock(mutex_);
 	if (withheld_.count(name) != 0) {
@@ -44,7 +44,7 @@ OfxStatus PropSet::get(const std::string& name, int index, T& out) const
 			out = *i;
 			return kOfxStatOK;
 		}
-		if (const double* d = std::get_if<double>(&v)) {
+		if (const double* d = std::get_if<double>(&v); d != nullptr && !exact) {
 			out = static_cast<int>(*d);
 			return kOfxStatOK;
 		}
@@ -53,7 +53,7 @@ OfxStatus PropSet::get(const std::string& name, int index, T& out) const
 			out = *d;
 			return kOfxStatOK;
 		}
-		if (const int* i = std::get_if<int>(&v)) {
+		if (const int* i = std::get_if<int>(&v); i != nullptr && !exact) {
 			out = static_cast<double>(*i);
 			return kOfxStatOK;
 		}
@@ -113,6 +113,15 @@ void PropSet::setStrings(const std::string& name, const std::vector<std::string>
 	for (const std::string& v : values) {
 		list.emplace_back(v);
 	}
+}
+
+void PropSet::copyValuesFrom(const PropSet& other)
+{
+	if (&other == this) {
+		return;
+	}
+	std::scoped_lock lock(mutex_, other.mutex_);
+	values_ = other.values_;
 }
 
 bool PropSet::has(const std::string& name) const
@@ -260,8 +269,8 @@ struct PropSuite {
 		*v = const_cast<char*>(s);
 		return st;
 	}
-	static OfxStatus getDouble(OfxPropertySetHandle h, const char* p, int i, double* v) { return h ? ps(h)->get<double>(p, i, *v) : kOfxStatErrBadHandle; }
-	static OfxStatus getInt(OfxPropertySetHandle h, const char* p, int i, int* v) { return h ? ps(h)->get<int>(p, i, *v) : kOfxStatErrBadHandle; }
+	static OfxStatus getDouble(OfxPropertySetHandle h, const char* p, int i, double* v) { return h ? ps(h)->get<double>(p, i, *v, true) : kOfxStatErrBadHandle; }
+	static OfxStatus getInt(OfxPropertySetHandle h, const char* p, int i, int* v) { return h ? ps(h)->get<int>(p, i, *v, true) : kOfxStatErrBadHandle; }
 	static OfxStatus getPointerN(OfxPropertySetHandle h, const char* p, int n, void** v)
 	{
 		for (int i = 0; i < n; ++i) {

@@ -372,6 +372,8 @@ private:
 			factory_->onUnload();
 			if (loadedPlugins.fetch_sub(1) == 1) {
 				releaseGpuState();
+				// Written after the release returns, so the line shows the drivers let go.
+				logger_.info("Unload: the binary's last plug-in released the GPU device state");
 			}
 		}
 		loaded_ = false;

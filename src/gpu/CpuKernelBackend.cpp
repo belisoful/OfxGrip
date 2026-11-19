@@ -82,6 +82,19 @@ private:
 		return Float4{texel[0], texel[1], texel[2], texel[3]};
 	}
 
+	/*! The texel-space position of a normalized coordinate, with texel 0's center at 0. A
+	    kernel that samples a pixel's center computes the coordinate in single precision, and
+	    the product lands a few units in the last place off the integer. A position within
+	    that error of an integer is the integer, so a center sample reads one texel exactly.
+	    The window is `extent * 2^-21` texels: under a thousandth of a texel for an HD frame,
+	    and no wider than the 1/256 texel a GPU sampler resolves up to 8192 pixels. */
+	static float texelPosition(float coordinate, float extent) noexcept
+	{
+		const float position = coordinate * extent - 0.5f;
+		const float nearest = std::round(position);
+		return std::fabs(position - nearest) <= extent * 0x1p-21f ? nearest : position;
+	}
+
 	Float4 sample(float u, float v) const noexcept
 	{
 		if (view_ == nullptr) {
@@ -91,15 +104,19 @@ private:
 		const float width = static_cast<float>(b.width());
 		const float height = static_cast<float>(b.height());
 		// Texel centers sit at half-integers; clamp-to-edge holds the edge texel outside.
-		const float fx = std::clamp(u * width - 0.5f, 0.0f, width - 1.0f);
-		const float fy = std::clamp(v * height - 0.5f, 0.0f, height - 1.0f);
+		const float fx = std::clamp(texelPosition(u, width), 0.0f, width - 1.0f);
+		const float fy = std::clamp(texelPosition(v, height), 0.0f, height - 1.0f);
 		const int x0 = static_cast<int>(std::floor(fx));
 		const int y0 = static_cast<int>(std::floor(fy));
-		const int x1 = std::min(x0 + 1, b.width() - 1);
-		const int y1 = std::min(y0 + 1, b.height() - 1);
 		const float tx = fx - static_cast<float>(x0);
 		const float ty = fy - static_cast<float>(y0);
 		const Float4 a = fetch(b.x1 + x0, b.y1 + y0);
+		if (tx == 0.0f && ty == 0.0f) {
+			// A sample at a texel center is that texel, whatever its neighbors hold.
+			return a;
+		}
+		const int x1 = std::min(x0 + 1, b.width() - 1);
+		const int y1 = std::min(y0 + 1, b.height() - 1);
 		const Float4 c = fetch(b.x1 + x1, b.y1 + y0);
 		const Float4 d = fetch(b.x1 + x0, b.y1 + y1);
 		const Float4 e = fetch(b.x1 + x1, b.y1 + y1);

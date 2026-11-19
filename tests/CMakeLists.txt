@@ -9,6 +9,15 @@ set(gtest_force_shared_crt ON CACHE INTERNAL "")
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
 
+# Every test program logs, keeps its support files, and caches under the build tree, so a test
+# never reads or writes the developer's own OfxGrip folders. The program's `main` sets the three
+# folder variables (TestMain.cpp), so a test run from ctest and one run by hand use the same
+# folders. A ctest `ENVIRONMENT` property is not used: `gtest_discover_tests` splits a list
+# value into property names and values, which drops every variable after the first.
+add_library(ofxgrip_test_main STATIC TestMain.cpp)
+target_link_libraries(ofxgrip_test_main PUBLIC GTest::gtest)
+target_compile_definitions(ofxgrip_test_main PUBLIC OFXGRIP_TEST_ROOT="${CMAKE_BINARY_DIR}")
+
 add_executable(ofxgrip_core_tests
   core/TypesTests.cpp
   core/ErrorTests.cpp
@@ -38,9 +47,9 @@ add_executable(ofxgrip_core_tests
   core/OverlayTests.cpp
   core/WatermarkTests.cpp
   core/LicensingTests.cpp)
-target_link_libraries(ofxgrip_core_tests PRIVATE OfxGrip::core GTest::gtest_main)
+target_link_libraries(ofxgrip_core_tests PRIVATE OfxGrip::core ofxgrip_test_main)
 target_compile_definitions(ofxgrip_core_tests PRIVATE OFXGRIP_KERNEL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/kernels")
-gtest_discover_tests(ofxgrip_core_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+gtest_discover_tests(ofxgrip_core_tests DISCOVERY_MODE PRE_TEST)
 
 add_executable(ofxgrip_ofx_tests
   ofx/ActionsTests.cpp
@@ -52,15 +61,15 @@ add_executable(ofxgrip_ofx_tests
   ofx/InteractTests.cpp
   ofx/LicensingEffectTests.cpp
   ofx/InferenceEffectTests.cpp)
-target_link_libraries(ofxgrip_ofx_tests PRIVATE OfxGrip::ofxgrip OfxGrip::minihost GTest::gtest_main)
+target_link_libraries(ofxgrip_ofx_tests PRIVATE OfxGrip::ofxgrip OfxGrip::minihost ofxgrip_test_main)
 # These tests share the support, cache, and log folders (user presets, the trial record, a
 # plug-in's log), so `ctest -j` runs them one at a time.
-gtest_discover_tests(ofxgrip_ofx_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache" RESOURCE_LOCK ofxgrip_test_folders)
+gtest_discover_tests(ofxgrip_ofx_tests DISCOVERY_MODE PRE_TEST PROPERTIES RESOURCE_LOCK ofxgrip_test_folders)
 
 add_executable(ofxgrip_integration_tests
   integration/MiniHostTests.cpp
   integration/GainBundleTests.cpp)
-target_link_libraries(ofxgrip_integration_tests PRIVATE OfxGrip::minihost OfxGrip::ofxgrip GTest::gtest_main)
+target_link_libraries(ofxgrip_integration_tests PRIVATE OfxGrip::minihost OfxGrip::ofxgrip ofxgrip_test_main)
 get_target_property(_gain_bundle ofxgrip_plugin_OfxGripGain OFXGRIP_BUNDLE_DIR)
 get_target_property(_dump_bundle ofxgrip_plugin_OfxGripHostDump OFXGRIP_BUNDLE_DIR)
 get_target_property(_spot_bundle ofxgrip_plugin_OfxGripSpot OFXGRIP_BUNDLE_DIR)
@@ -80,16 +89,16 @@ if(OFXGRIP_BUILD_RUST)
 endif()
 # These tests share the support, cache, and log folders (user presets, the trial record, a
 # plug-in's log), so `ctest -j` runs them one at a time.
-gtest_discover_tests(ofxgrip_integration_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache" RESOURCE_LOCK ofxgrip_test_folders)
+gtest_discover_tests(ofxgrip_integration_tests DISCOVERY_MODE PRE_TEST PROPERTIES RESOURCE_LOCK ofxgrip_test_folders)
 
 if(APPLE)
   add_executable(ofxgrip_gpu_tests gpu/MetalBackendTests.cpp)
-  target_link_libraries(ofxgrip_gpu_tests PRIVATE OfxGrip::gpu_metal GTest::gtest_main)
-  gtest_discover_tests(ofxgrip_gpu_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+  target_link_libraries(ofxgrip_gpu_tests PRIVATE OfxGrip::gpu_metal ofxgrip_test_main)
+  gtest_discover_tests(ofxgrip_gpu_tests DISCOVERY_MODE PRE_TEST)
 endif()
 
 add_executable(ofxgrip_kernel_tests gpu/KernelEngineTests.cpp)
-target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::kernels GTest::gtest_main)
+target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::kernels ofxgrip_test_main)
 if(APPLE)
   target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::gpu_metal)
 endif()
@@ -101,31 +110,32 @@ if(TARGET ofxgrip_gpu_vulkan)
   target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::gpu_vulkan)
 endif()
 ofxgrip_add_kernels(TARGET ofxgrip_kernel_tests KERNELS fixtures/kernels/GripBlur.slang fixtures/kernels/GripInspect.slang)
-gtest_discover_tests(ofxgrip_kernel_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+gtest_discover_tests(ofxgrip_kernel_tests DISCOVERY_MODE PRE_TEST)
 
 if(TARGET ofxgrip_gpu_opencl)
   add_executable(ofxgrip_opencl_tests gpu/OpenCLBackendTests.cpp)
-  target_link_libraries(ofxgrip_opencl_tests PRIVATE OfxGrip::gpu_opencl GTest::gtest_main)
-  gtest_discover_tests(ofxgrip_opencl_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+  target_link_libraries(ofxgrip_opencl_tests PRIVATE OfxGrip::gpu_opencl ofxgrip_test_main)
+  gtest_discover_tests(ofxgrip_opencl_tests DISCOVERY_MODE PRE_TEST)
   # A machine without OpenCL: the program names a library that does not exist before anything
   # opens the runtime, then loads the Gain bundle as an OpenCL host.
   add_executable(ofxgrip_opencl_absent_tests gpu/OpenCLRuntimeAbsentTests.cpp)
   target_link_libraries(ofxgrip_opencl_absent_tests PRIVATE OfxGrip::minihost GTest::gtest)
+  target_compile_definitions(ofxgrip_opencl_absent_tests PRIVATE OFXGRIP_TEST_ROOT="${CMAKE_BINARY_DIR}")
   target_compile_definitions(ofxgrip_opencl_absent_tests PRIVATE OFXGRIP_GAIN_BUNDLE="${_gain_bundle}")
   add_dependencies(ofxgrip_opencl_absent_tests ofxgrip_plugin_OfxGripGain)
-  gtest_discover_tests(ofxgrip_opencl_absent_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache" RESOURCE_LOCK ofxgrip_test_folders)
+  gtest_discover_tests(ofxgrip_opencl_absent_tests DISCOVERY_MODE PRE_TEST PROPERTIES RESOURCE_LOCK ofxgrip_test_folders)
 endif()
 
 add_executable(ofxgrip_c_tests c/CContractTests.cpp)
-target_link_libraries(ofxgrip_c_tests PRIVATE OfxGrip::c OfxGrip::minihost GTest::gtest_main)
-gtest_discover_tests(ofxgrip_c_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+target_link_libraries(ofxgrip_c_tests PRIVATE OfxGrip::c OfxGrip::minihost ofxgrip_test_main)
+gtest_discover_tests(ofxgrip_c_tests DISCOVERY_MODE PRE_TEST)
 
 # The InferKit backend against a stand-in library that exports InferKit's C interface.
 add_library(ofxgrip_fake_inferkit MODULE fixtures/inferkit/FakeInferKit.cpp)
 target_link_libraries(ofxgrip_fake_inferkit PRIVATE nlohmann_json::nlohmann_json)
 set_target_properties(ofxgrip_fake_inferkit PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
 add_executable(ofxgrip_inference_tests inference/InferKitBackendTests.cpp)
-target_link_libraries(ofxgrip_inference_tests PRIVATE OfxGrip::inference GTest::gtest_main)
+target_link_libraries(ofxgrip_inference_tests PRIVATE OfxGrip::inference ofxgrip_test_main)
 target_compile_definitions(ofxgrip_inference_tests PRIVATE OFXGRIP_FAKE_INFERKIT="$<TARGET_FILE:ofxgrip_fake_inferkit>")
 add_dependencies(ofxgrip_inference_tests ofxgrip_fake_inferkit)
-gtest_discover_tests(ofxgrip_inference_tests DISCOVERY_MODE PRE_TEST PROPERTIES ENVIRONMENT "OFXGRIP_LOG_DIR=${CMAKE_BINARY_DIR}/test-logs;OFXGRIP_SUPPORT_DIR=${CMAKE_BINARY_DIR}/test-support;OFXGRIP_CACHE_DIR=${CMAKE_BINARY_DIR}/test-cache")
+gtest_discover_tests(ofxgrip_inference_tests DISCOVERY_MODE PRE_TEST)

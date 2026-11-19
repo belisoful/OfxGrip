@@ -192,6 +192,12 @@ textures over the host's buffers (or blits through an intermediate when the row 
 aligned), sets the function constants, and commits without waiting. OpenFX frames are bottom-up,
 so the tile carries `kGripTileRowsAscend` and `gripImagePixel` reads rows ascending.
 
+The CPU backend's sampler reads a pixel center exactly. A kernel computes a normalized
+coordinate in single precision, so the texel position lands a few units in the last place off
+the integer. The sampler takes a position within `extent * 2^-21` texels of an integer as that
+integer and returns the one texel. A kernel whose gain is 1 over a region therefore returns the
+source there bit for bit, which a host's 8-bit write shows (255 stays 255).
+
 ## The Vulkan accelerator (phase 4)
 
 No OpenFX host delivers Vulkan frames, so the Vulkan backend serves CPU renders. A dispatch

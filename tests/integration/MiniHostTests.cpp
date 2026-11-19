@@ -64,6 +64,15 @@ TEST(MiniHostParams, InstantiateCopiesPropertiesAndDefaults)
 	EXPECT_EQ(ip->props().getString(kOfxPropLabel), "Point");
 	EXPECT_EQ(ip->props().getInt(kOfxParamPropSecret), 1);
 	EXPECT_EQ(ip->props().getString(kOfxPropType), kOfxTypeParameterInstance);
+	// A whole-valued double stays a double on the instance, and an int stays an int.
+	const OfxPropertySuiteV1* suite = PropSet::suite();
+	double asDouble = 0.0;
+	int asInt = 0;
+	EXPECT_EQ(suite->propGetDouble(ip->props().handle(), kOfxParamPropDefault, 0, &asDouble), kOfxStatOK);
+	EXPECT_EQ(asDouble, 3.0);
+	EXPECT_EQ(suite->propGetInt(ip->props().handle(), kOfxParamPropDefault, 0, &asInt), kOfxStatErrValue);
+	EXPECT_EQ(suite->propGetInt(ip->props().handle(), kOfxParamPropSecret, 0, &asInt), kOfxStatOK);
+	EXPECT_EQ(suite->propGetDouble(ip->props().handle(), kOfxParamPropSecret, 0, &asDouble), kOfxStatErrValue);
 	Param* s = set.define(kOfxParamTypeString, "s");
 	s->props().setString(kOfxParamPropDefault, "text");
 	EXPECT_EQ(set.instantiate()->find("s")->stringValueAt(0), "text");
@@ -142,6 +151,22 @@ TEST(MiniHostProps, WithheldAndReadOnlyProperties)
 	EXPECT_EQ(suite->propGetInt(p.handle(), "b", 3, &v), kOfxStatErrUnknown);
 	p.setDoubles("d", {1, 2});
 	EXPECT_EQ(suite->propGetDouble(p.handle(), "d", 5, nullptr) == kOfxStatErrBadIndex, true);
+	// The suite is typed, as Natron's is: an int read of a double property and a double read of
+	// an int property both fail. The C++ accessors convert for a test's convenience.
+	double asDouble = -1.0;
+	EXPECT_EQ(suite->propGetInt(p.handle(), "d", 0, &v), kOfxStatErrValue);
+	EXPECT_EQ(suite->propGetDouble(p.handle(), "d", 1, &asDouble), kOfxStatOK);
+	EXPECT_EQ(asDouble, 2.0);
+	p.setInt("i", 7);
+	EXPECT_EQ(suite->propGetDouble(p.handle(), "i", 0, &asDouble), kOfxStatErrValue);
+	EXPECT_EQ(asDouble, 2.0);
+	int ints[1] = {0};
+	double doubles[1] = {0.0};
+	EXPECT_EQ(suite->propGetDoubleN(p.handle(), "i", 1, doubles), kOfxStatErrValue);
+	EXPECT_EQ(suite->propGetIntN(p.handle(), "i", 1, ints), kOfxStatOK);
+	EXPECT_EQ(ints[0], 7);
+	EXPECT_EQ(p.getDouble("i"), 7.0);
+	EXPECT_EQ(p.getInt("d", 0, 1), 2);
 	int count = 0;
 	EXPECT_EQ(suite->propGetDimension(p.handle(), "d", &count), kOfxStatOK);
 	EXPECT_EQ(count, 2);

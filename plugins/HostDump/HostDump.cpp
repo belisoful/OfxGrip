@@ -260,21 +260,29 @@ private:
 			     << " enabled=" << binding.properties.getInt(kOfxParamPropEnabled, -1, 0) << " persistent=" << binding.properties.getInt(kOfxParamPropPersistant, -1, 0);
 			const int dims = binding.spec.dimensions();
 			if (dims > 0) {
+				// An integer parameter's range is an int property. A host with typed properties (Natron) refuses a double read of it.
+				const bool integer = binding.properties.getString(kOfxParamPropType, std::string(), 0).rfind(kOfxParamTypeInteger, 0) == 0;
+				const auto bound = [&](const char* name, int d) {
+					if (integer) {
+						return static_cast<double>(binding.properties.getInt(name, -9999, d));
+					}
+					return binding.properties.getDouble(name, -9999.0, d);
+				};
 				line << " min=";
 				for (int d = 0; d < dims; ++d) {
-					line << (d ? "," : "") << binding.properties.getDouble(kOfxParamPropMin, -9999.0, d);
+					line << (d ? "," : "") << bound(kOfxParamPropMin, d);
 				}
 				line << " max=";
 				for (int d = 0; d < dims; ++d) {
-					line << (d ? "," : "") << binding.properties.getDouble(kOfxParamPropMax, -9999.0, d);
+					line << (d ? "," : "") << bound(kOfxParamPropMax, d);
 				}
 				line << " displayMin=";
 				for (int d = 0; d < dims; ++d) {
-					line << (d ? "," : "") << binding.properties.getDouble(kOfxParamPropDisplayMin, -9999.0, d);
+					line << (d ? "," : "") << bound(kOfxParamPropDisplayMin, d);
 				}
 				line << " displayMax=";
 				for (int d = 0; d < dims; ++d) {
-					line << (d ? "," : "") << binding.properties.getDouble(kOfxParamPropDisplayMax, -9999.0, d);
+					line << (d ? "," : "") << bound(kOfxParamPropDisplayMax, d);
 				}
 				line << " defaultCoordinateSystem=" << (binding.properties.has(kOfxParamPropDefaultCoordinateSystem) ? "present" : "missing");
 			}

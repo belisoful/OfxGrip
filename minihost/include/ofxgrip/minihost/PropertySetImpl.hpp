@@ -8,6 +8,11 @@
 	Introduced in OfxGrip 0.1.0. A property set may be marked read-only for a name so a test can
 	imitate a host that rejects a write (Q-OFX-ANY-014), and a name may be withheld so a read
 	fails as it does on a host that lacks the property (Q-OFX-ANY-015).
+
+	The suite is typed since OfxGrip 0.5.0: `propGetDouble` on an int property and `propGetInt`
+	on a double property answer `kOfxStatErrValue`. Natron 2.5 refuses such a read, and a
+	plug-in that reads an integer parameter's range as doubles gets nothing there. The C++
+	accessors (`getInt`, `getDouble`) still convert between the two.
 */
 #pragma once
 
@@ -44,6 +49,8 @@ public:
 	void setDoubles(const std::string& name, const std::vector<double>& values);
 	void setStrings(const std::string& name, const std::vector<std::string>& values);
 	void reset(const std::string& name) { values_.erase(name); }
+	/*! Replaces every value with a copy of `other`'s, each with the type it was stored with. */
+	void copyValuesFrom(const PropSet& other);
 
 	bool has(const std::string& name) const;
 	int dimension(const std::string& name) const;
@@ -80,7 +87,7 @@ private:
 	template <typename T>
 	OfxStatus set(const std::string& name, int index, T value);
 	template <typename T>
-	OfxStatus get(const std::string& name, int index, T& out) const;
+	OfxStatus get(const std::string& name, int index, T& out, bool exact = false) const;
 };
 
 }  // namespace minihost

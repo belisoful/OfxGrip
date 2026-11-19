@@ -27,7 +27,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <sstream>
+#include <string>
 
 using namespace ofxgrip;
 using namespace ofxgrip::minihost;
@@ -65,6 +69,39 @@ protected:
 		ASSERT_NE(instance_, nullptr);
 	}
 	static float at(const ImageBuffer& image, int x, int y, std::size_t c) { return readComponent(image.view().pixel(x, y), image.desc().depth, c); }
+	/*! Empty when the two images hold the same component values; otherwise the count of differing
+	    components and the first one. */
+	static std::string mismatches(const ImageBuffer& a, const ImageBuffer& b)
+	{
+		const RectI bounds = b.desc().bounds;
+		const std::size_t n = componentCount(b.desc().components);
+		int count = 0;
+		std::string first;
+		float worst = 0.0f;
+		for (int y = bounds.y1; y < bounds.y2; ++y) {
+			for (int x = bounds.x1; x < bounds.x2; ++x) {
+				for (std::size_t c = 0; c < n; ++c) {
+					const float va = at(a, x, y, c);
+					const float vb = at(b, x, y, c);
+					if (va != vb) {
+						++count;
+						worst = std::max(worst, std::fabs(va - vb));
+						if (first.empty()) {
+							std::ostringstream text;
+							text << std::setprecision(9) << "(" << x << "," << y << ") component " << c << ": " << va << " vs " << vb;
+							first = text.str();
+						}
+					}
+				}
+			}
+		}
+		if (count == 0) {
+			return {};
+		}
+		std::ostringstream text;
+		text << std::setprecision(9) << count << " components differ, worst by " << worst << ", first at " << first;
+		return text.str();
+	}
 	Bundle bundle_;
 	OfxPlugin* plugin_{nullptr};
 	std::unique_ptr<MiniHost> host_;
@@ -100,6 +137,31 @@ TEST_F(SpotBundle, DescribesTheKernelsParametersAndPaths)
 	EXPECT_EQ(params->find("tint")->props().getString(kOfxParamPropParent), "Look");
 	EXPECT_EQ(params->find("INVERT")->type(), kOfxParamTypeBoolean);
 	EXPECT_EQ(host_->contextClips(kOfxImageEffectContextFilter), (std::vector<std::string>{"Source", "Output"}));
+}
+
+// Inside the radius the gain is 1 and the kernel samples each source pixel at its center, so the
+// frame is the source bit for bit.
+TEST_F(SpotBundle, InsideTheRadiusTheFrameIsTheSourceExactly)
+{
+	start(HostOptions::spec(), 64, 48);
+	instance_->setParam("center", {32.0, 24.0});
+	instance_->setParam("radius", {1000.0});
+	instance_->setParam("softness", {50.0});
+	instance_->setParam("outsideGain", {0.2});
+	for (BitDepth depth : {BitDepth::Float, BitDepth::Half, BitDepth::UInt16, BitDepth::UInt8}) {
+		const std::shared_ptr<ImageBuffer> source = makeRampImage(64, 48, depth);
+		instance_->setInput("Source", source);
+		RenderRequest request;
+		request.depth = depth;
+		RenderResult whole = instance_->render(request);
+		ASSERT_TRUE(whole.ok()) << toString(depth);
+		EXPECT_EQ(mismatches(whole.image, *source), "") << toString(depth);
+		request.tileSize = 7;
+		request.threads = 3;
+		RenderResult tiled = instance_->render(request);
+		ASSERT_TRUE(tiled.ok()) << toString(depth);
+		EXPECT_EQ(mismatches(tiled.image, *source), "") << toString(depth);
+	}
 }
 
 TEST_F(SpotBundle, RendersTheSpotlightOnTheCpu)

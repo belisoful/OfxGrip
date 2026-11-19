@@ -7,6 +7,8 @@
 #include <ofxgrip/minihost/BundleLoader.hpp>
 #include <ofxgrip/minihost/MiniHost.hpp>
 
+#include "../TestEnvironment.hpp"
+
 #include "ofxGPURender.h"
 
 #include <gtest/gtest.h>
@@ -70,11 +72,8 @@ TEST(OpenCLRuntimeAbsent, AnOpenCLHostGetsCpuRendersFromThePlugIn)
 
 int main(int argc, char** argv)
 {
-#if defined(_WIN32)
-	_putenv_s("OFXGRIP_OPENCL_LIBRARY", kMissingLibrary);
-#else
-	setenv("OFXGRIP_OPENCL_LIBRARY", kMissingLibrary, 1);
-#endif
+	ofxgrip::testing::useBuildTreeFolders(OFXGRIP_TEST_ROOT);
+	ofxgrip::testing::setTestEnv("OFXGRIP_OPENCL_LIBRARY", kMissingLibrary);
 	::testing::InitGoogleTest(&argc, argv);
 	return RUN_ALL_TESTS();
 }

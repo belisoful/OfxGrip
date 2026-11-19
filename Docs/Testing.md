@@ -53,8 +53,23 @@ beside the effect. `Instance::overlayDraw`, `overlayPenDown`, `overlayPenMotion`
 suite records every call (`drawCalls()`), and `HostOptions::drawSuite = false` (the Nuke and
 Natron presets) withholds it so the plug-in takes the OpenGL path.
 
-Tests run with `OFXGRIP_LOG_DIR`, `OFXGRIP_SUPPORT_DIR`, and `OFXGRIP_CACHE_DIR` pointing into the
-build directory, so user presets and analysis spill files never touch the real folders.
+Every test program points `OFXGRIP_LOG_DIR`, `OFXGRIP_SUPPORT_DIR`, and `OFXGRIP_CACHE_DIR` into
+the build directory (`test-logs`, `test-support`, `test-cache`) first thing in `main`
+(`tests/TestMain.cpp`), so a test reads and writes none of the developer's own OfxGrip folders,
+whether ctest runs it or a person does. A variable the caller already set is kept. The folders
+matter to the result: the Spot sample is a 30-day trial that keeps its first-run date in the
+support folder, and a test that read a developer's expired trial rendered the unlicensed mark.
+A ctest `ENVIRONMENT` property does not carry the three variables, because
+`gtest_discover_tests` splits a list value and keeps the first entry only.
+
+ctest runs each test in its own process and several at once. A test that needs a temporary
+folder names it with `ofxgrip::testing::currentTestTag()` (`tests/TestEnvironment.hpp`), so no
+other test removes it.
+
+The mini host's property suite is typed. `propGetDouble` on an int property and `propGetInt` on a
+double property answer `kOfxStatErrValue`, which is what Natron 2.5 does, and an instance's
+properties keep the types the descriptor stored. A plug-in that reads an integer parameter's
+range with `propGetDouble` gets nothing there.
 
 `MiniHost::createInstance` takes a `restore` callback that runs over the instantiated parameters
 before the create action, so a test can imitate a host restoring a saved document (the hidden
@@ -95,7 +110,14 @@ headers. A Windows 10 machine with an NVIDIA RTX card runs the same presets on r
 `-DOFXGRIP_OPENCL_INCLUDE_DIR` set to the CUDA toolkit's `include` folder, which holds
 `CL/cl.h`. There the Vulkan and OpenCL tests run on the card. The bundle tests load and unload
 real plug-in binaries, which is where a driver call from a static destructor shows up: the test
-never returns.
+never returns. The binary's last unload action writes `Unload: the binary's last plug-in released
+the GPU device state` to the plug-in's log after the release returns, so a host run shows that
+the unload action ran.
+
+Natron 2.5 on that machine loads the bundles from `OFX_PLUGIN_PATH`, and `NatronRenderer -w`
+renders a project headless. `NatronRenderer -t` (a Python script) crashes in Natron's own Python
+teardown at exit with or without OfxGrip plug-ins, so only project-mode runs count as evidence
+of a clean unload.
 
 ## Backends without their hardware
 

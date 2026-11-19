@@ -5,6 +5,8 @@
 
 #include "FakeServices.hpp"
 
+#include "../TestEnvironment.hpp"
+
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -18,7 +20,7 @@ namespace {
 std::filesystem::path freshDirectory(const char* name)
 {
 	static int counter = 0;
-	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-framedata-" + std::to_string(++counter)) / name;
+	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-framedata-" + ofxgrip::testing::currentTestTag() + "-" + std::to_string(++counter)) / name;
 	std::error_code ec;
 	std::filesystem::remove_all(dir.parent_path(), ec);
 	std::filesystem::create_directories(dir, ec);

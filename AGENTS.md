@@ -67,6 +67,12 @@ limactl shell ofxgrip -- bash -lc 'cmake -S /Users/user/Code/EveryGrip/OfxGrip -
 
 `Docs/Testing.md` describes the machine and the software Vulkan and OpenCL drivers in it.
 
+Test programs link `ofxgrip_test_main` (`tests/TestMain.cpp`), never `GTest::gtest_main`. Its
+`main` points the log, support, and cache folders into the build directory, so a test never
+reads or writes the developer's own OfxGrip folders. A test program with its own `main` calls
+`ofxgrip::testing::useBuildTreeFolders` first. A test names a temporary folder with
+`ofxgrip::testing::currentTestTag()`, because ctest runs tests in parallel processes.
+
 ### Live host
 
 Resolve loads bundles from `/Library/OFX/Plugins`. `scripts/install-bundle.sh <bundle>` copies a built

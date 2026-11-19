@@ -18,11 +18,34 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 using namespace ofxgrip;
 using namespace ofxgrip::minihost;
 
 namespace {
+
+/*! The last line of a plug-in's log that holds `marker`, or an empty string. The test program's
+    `main` points `OFXGRIP_LOG_DIR` into the build tree. */
+std::string lastLogLine(const std::string& pluginId, const std::string& marker)
+{
+	const char* directory = std::getenv("OFXGRIP_LOG_DIR");
+	if (directory == nullptr) {
+		return {};
+	}
+	std::ifstream in(std::filesystem::path(directory) / (pluginId + ".log"), std::ios::binary);
+	std::string line;
+	std::string last;
+	while (std::getline(in, line)) {
+		if (line.find(marker) != std::string::npos) {
+			last = line;
+		}
+	}
+	return last;
+}
 
 class GainBundle : public ::testing::Test {
 protected:
@@ -217,6 +240,12 @@ TEST(HostDumpBundle, LoadsDescribesAndPassesThrough)
 	instance->setInput("Source", makeRampImage(8, 4, BitDepth::UInt8));
 	EXPECT_EQ(instance->instanceChanged("probeButton"), kOfxStatOK);
 	EXPECT_EQ(stringValue(*instance, "probeStatus"), "dumped; see the OfxGrip log");
+	// An integer parameter's range is an int property, and the typed suite refuses a double read
+	// of it. The dump prints the range the manifest declares.
+	const std::string ranged = lastLogLine("com.belisoful.ofxgrip.hostdump", "param probeIntRanged ");
+	EXPECT_NE(ranged.find(" min=-1000 max=1000 displayMin=-1000 displayMax=1000 "), std::string::npos) << ranged;
+	const std::string real = lastLogLine("com.belisoful.ofxgrip.hostdump", "param probeDouble ");
+	EXPECT_EQ(real.find("-9999"), std::string::npos) << real;
 	RenderRequest request;
 	request.depth = BitDepth::UInt8;
 	RenderResult result = instance->render(request);
@@ -230,6 +259,9 @@ TEST(HostDumpBundle, LoadsDescribesAndPassesThrough)
 	generator.reset();
 	instance.reset();
 	EXPECT_EQ(host.unload(), kOfxStatOK);
+	// The binary's last unload action lets go of the GPU state and says so.
+	const std::string unloaded = lastLogLine("com.belisoful.ofxgrip.hostdump", "Unload: ");
+	EXPECT_NE(unloaded.find("released the GPU device state"), std::string::npos) << unloaded;
 }
 
 // ---- Metal frames (macOS) -----------------------------------------------------------------------

@@ -31,7 +31,7 @@ hello = "Hallo \"Welt\"\n";
 std::filesystem::path freshBundle()
 {
 	static int counter = 0;
-	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-i18n-" + std::to_string(++counter)) / "Test.ofx.bundle";
+	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-i18n-" + ofxgrip::testing::currentTestTag() + "-" + std::to_string(++counter)) / "Test.ofx.bundle";
 	std::error_code ec;
 	std::filesystem::remove_all(dir.parent_path(), ec);
 	std::filesystem::create_directories(dir / "Contents" / "Resources" / "de.lproj", ec);

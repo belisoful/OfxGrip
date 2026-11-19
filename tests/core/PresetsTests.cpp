@@ -7,6 +7,8 @@
 
 #include "FakeServices.hpp"
 
+#include "../TestEnvironment.hpp"
+
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -22,7 +24,7 @@ enum : ParameterId { kAmount = 1, kMode = 2, kColor = 3, kTint = 4, kCenter = 5,
 std::filesystem::path freshDirectory(const char* name)
 {
 	static int counter = 0;
-	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-presets-" + std::to_string(++counter)) / name;
+	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-presets-" + ofxgrip::testing::currentTestTag() + "-" + std::to_string(++counter)) / name;
 	std::error_code ec;
 	std::filesystem::remove_all(dir, ec);
 	std::filesystem::create_directories(dir, ec);

@@ -8,6 +8,8 @@
 
 #include "FakeServices.hpp"
 
+#include "../TestEnvironment.hpp"
+
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -23,7 +25,7 @@ enum : ParameterId { kGain = 1, kLicensed = 9996, kMenu = 9997 };
 std::filesystem::path freshDirectory(const char* name)
 {
 	static int counter = 0;
-	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-licensing-" + std::to_string(++counter)) / name;
+	const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("ofxgrip-licensing-" + ofxgrip::testing::currentTestTag() + "-" + std::to_string(++counter)) / name;
 	std::error_code ec;
 	std::filesystem::remove_all(dir.parent_path(), ec);
 	std::filesystem::create_directories(dir, ec);

@@ -61,28 +61,7 @@ bool Param::animates() const
 std::unique_ptr<Param> Param::instantiate() const
 {
 	auto out = std::make_unique<Param>(name_, type_);
-	for (const std::string& name : props_.names()) {
-		const int n = props_.dimension(name);
-		for (int i = 0; i < n; ++i) {
-			if (void* p = props_.getPointer(name, i); p != nullptr) {
-				out->props_.setPointer(name, p, i);
-				continue;
-			}
-			const std::string s = props_.getString(name, "\x01", i);
-			if (s != "\x01") {
-				out->props_.setString(name, s, i);
-				continue;
-			}
-			const double d = props_.getDouble(name, 1.5e300, i);
-			if (d != 1.5e300) {
-				if (double(static_cast<int>(d)) == d && props_.getInt(name, -1, i) == static_cast<int>(d)) {
-					out->props_.setInt(name, static_cast<int>(d), i);
-				} else {
-					out->props_.setDouble(name, d, i);
-				}
-			}
-		}
-	}
+	out->props_.copyValuesFrom(props_);
 	out->props_.setString(kOfxPropType, kOfxTypeParameterInstance);
 	if (isString()) {
 		out->text_ = props_.getString(kOfxParamPropDefault, "");
