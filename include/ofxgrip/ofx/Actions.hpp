@@ -121,9 +121,9 @@ struct RegionArgs {
 	RectD regionOfInterest;   /*!< Filled for regions of interest only. */
 };
 
-/*! The create-instance arguments. */
+/*! What the host states about a new instance. */
 struct CreateInstanceArgs {
-	std::string resolvePage;  /*!< `Edit`, `Color`, or `Fusion` on Resolve (Q-RESOLVE-029). */
+	std::string resolvePage;  /*!< `Edit`, `Color`, or `Fusion` on Resolve (Q-RESOLVE-029). Empty on other hosts. */
 };
 
 RenderArgs readRenderArgs(const PropertySet& inArgs);
@@ -131,7 +131,9 @@ SequenceRenderArgs readSequenceRenderArgs(const PropertySet& inArgs);
 IsIdentityArgs readIsIdentityArgs(const PropertySet& inArgs);
 InstanceChangedArgs readInstanceChangedArgs(const PropertySet& inArgs);
 RegionArgs readRegionArgs(const PropertySet& inArgs, bool withRegionOfInterest);
-CreateInstanceArgs readCreateInstanceArgs(const PropertySet& inArgs);
+/*! Reads what the host states about a new instance. Resolve puts the page on the effect
+    instance's properties and passes no arguments to the action. */
+CreateInstanceArgs readCreateInstanceArgs(const PropertySet& instance);
 
 /*! The OpenFX names of the enums, and their parsers. */
 const char* ofxContextName(EffectKind kind) noexcept;

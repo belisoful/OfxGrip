@@ -236,16 +236,19 @@ the third as the Resolve scripting bridge. The channel is the handoff D-007 alre
 
 ## 8. Verification on the Mac
 
-- Resolve 21.1.1: the app-start scan is done (2026-10-14). The per-page probes on the Edit, Color,
-  and Fusion pages are open: a Metal render through Resolve's queue, the Presets control, the
-  analysis pass, label strings, overlays, and licensing. The 0.5.0 bundles have not run in Resolve
-  on the Mac.
-- Tests: OfxGrip has 380. FxGrip has about 3,800.
+- Resolve 21.1.1: the app-start scan is done (2026-10-14). The 0.5.0 bundles ran on the Edit and
+  Fusion pages on 2026-11-26: HostDump and Spot render on Metal through Resolve's queue, Spot
+  shows its trial watermark, an Inspector edit re-renders, and the overlay draws on the Fusion
+  page. The run found Q-RESOLVE-039 (a hang, fixed) and that Resolve states the page on the
+  instance. Open: a node-level effect on the Color page, the Presets control, the analysis pass,
+  label strings, an overlay drag, and a licensed render.
+- Tests: OfxGrip has 382. FxGrip has about 3,800.
 - Documentation: OfxGrip has four documents. FxGrip has 63 DocC articles.
 
 ## 9. Order
 
-1. Run the live Resolve probes on the Mac for what exists.
+1. Run the live Resolve probes on the Mac for what exists. Done for the Edit and Fusion pages;
+   section 8 lists what is open.
 2. Port the host-neutral C++ parts. Done: color gamut math, timecode, curve data, path data,
    dictionary values with interpolation, the URL whitelist. Open: kernel color conversion, the
    timing fields of `TimeService`, temporal access, the image buffer, the missing overlay parts,

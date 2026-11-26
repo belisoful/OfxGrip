@@ -265,7 +265,7 @@ private:
 		case Action::DescribeInContext:
 			return describeInContext(static_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in);
 		case Action::CreateInstance:
-			return createInstance(static_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in);
+			return createInstance(static_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
 		default:
 			break;
 		}
@@ -503,7 +503,7 @@ private:
 		return kOfxStatOK;
 	}
 
-	OfxStatus createInstance(OfxImageEffectHandle handle, const PropertySet& in)
+	OfxStatus createInstance(OfxImageEffectHandle handle)
 	{
 		std::unique_ptr<Effect> effect = factory_->create();
 		if (!effect) {
@@ -523,12 +523,12 @@ private:
 			logger_.error("Create instance failed: " + e.describe());
 			return errorToStatus(e);
 		}
-		const CreateInstanceArgs args = readCreateInstanceArgs(in);
-		effect->attach(std::move(services), args);
 		OfxPropertySetHandle props = nullptr;
 		if (suites_.imageEffect->getPropertySet(handle, &props) != kOfxStatOK) {
 			return kOfxStatErrBadHandle;
 		}
+		const CreateInstanceArgs args = readCreateInstanceArgs(PropertySet(suites_.property, props));
+		effect->attach(std::move(services), args);
 		if (Error e = PropertySet(suites_.property, props).setPointer(kOfxPropInstanceData, effect.get())) {
 			logger_.error("Cannot store the instance pointer: " + e.describe());
 			return errorToStatus(e);

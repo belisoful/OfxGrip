@@ -192,10 +192,10 @@ RegionArgs readRegionArgs(const PropertySet& in, bool withRegionOfInterest)
 	return a;
 }
 
-CreateInstanceArgs readCreateInstanceArgs(const PropertySet& in)
+CreateInstanceArgs readCreateInstanceArgs(const PropertySet& instance)
 {
 	CreateInstanceArgs a;
-	a.resolvePage = in.getString(resolve::kPropPage, std::string(), 0);
+	a.resolvePage = instance.getString(resolve::kPropPage, std::string(), 0);
 	return a;
 }
 

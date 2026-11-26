@@ -1,6 +1,6 @@
 # OfxGrip Plan
 
-Date: 2026-10-14. Status: phases 0 and 1 are on `main`; phase 2 is built and verified (218 tests under debug, ASan+UBSan, TSan, and the x86_64 slice, including the Rust sample bundle driven through the mini host). The per-page Resolve probes remain.
+Date: 2026-10-14. Status: phases 0 and 1 are on `main`; phase 2 is built and verified (218 tests under debug, ASan+UBSan, TSan, and the x86_64 slice, including the Rust sample bundle driven through the mini host). The instance probes ran on the Edit and Fusion pages on 2026-11-26; a node-level effect on the Color page remains.
 
 OfxGrip is the OpenFX counterpart of FxGrip: a C++20 framework for OpenFX image-effect plug-ins
 that gives Resolve, Fusion, Nuke, and Natron plug-ins what FxGrip gives Final Cut Pro and Motion
@@ -69,14 +69,14 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Plug-ins: `HostDump` probe (host description, suites, extension-property acceptance, action log) and `OfxGripGain` (CPU filter built on the framework).
 - Mini host: loads a bundle, implements the suites, runs the real action order, tiles, renders concurrently, injects quirk profiles. First tests.
 - Bundle packaging on macOS (`X.ofx.bundle/Contents/MacOS/X.ofx`, `Info.plist`), an install script that copies (never links, Q-RESOLVE-025), a validator.
-- Live: install both plug-ins in Resolve, record Q-RESOLVE-001 and the capability-dump entries in the registry. Done 2026-10-14 for the app-start scan (registry section 3.1); the per-page instance probes remain.
+- Live: install both plug-ins in Resolve, record Q-RESOLVE-001 and the capability-dump entries in the registry. Done 2026-10-14 for the app-start scan and 2026-11-26 for instances on the Edit and Fusion pages (registry section 3.1).
 
 ### Phase 1: parameter model, state, Metal (built 2026-10-14)
 
 - Done: runtime `Parameter` objects, groups, lookups (`effect[id]`, `effect["key"]`). Meta and tags in `MetaManager`, persisted through the state parameter by `MetaExtension`. `visibleWhen` and `enabledWhen` rules (`Rules.hpp`) applied by `VisibilityExtension`; target presets and momentary reset values applied by `MetaExtension`. Versioning and migrations (`VersioningExtension`, `Effect::onMigrate`, deprecated majors as their own plug-in slots). `Effect::edit` over `EditScope`.
 - Done: Metal backend (`include/ofxgrip/gpu/MetalBackend.hpp`) through metal-cpp with the host's command queue, a pipeline cache and scratch pool per queue, `GpuImage` over `MTLBuffer` frames, and the Fusion-page intermediate copy (Q-RESOLVE-031). `Gain` renders Metal frames; `HostDump` passes them through with a blit.
 - Done: mini host Metal frames on macOS (`RenderRequest::gpu`); quirk profiles for Resolve, Nuke, Natron.
-- Open: Resolve behavior probes (registry section 5, step 2) on the Edit, Color, and Fusion pages, including a Metal render through Resolve's queue.
+- Resolve behavior probes (registry section 5, step 2): a Metal render through Resolve's queue ran on the Edit and Fusion pages on 2026-11-26. Open: a node-level effect on the Color page, masks, the thread suite, an overlay drag.
 
 ### Phase 2: presets, analysis, controls, extensions (built 2026-10-14)
 
@@ -85,7 +85,7 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: control lowering: Section → open group; Banner and Divider → label-mode strings (disabled single-line fields where label strings do not persist, Q-NUKE-009); Status, Capsule, Progress → disabled standard parameters the effect writes into; Switch → boolean; `InDebugMode` parameters start hidden.
 - Done: `I18n` (`.strings` tables under `Contents/Resources/<lang>.lproj`, describe-time manifest localization, runtime label and value round trips), `About` and `Debug` menus as momentary choice parameters, `InstanceTracker`, and `Regression` checks. All gated by manifest properties.
 - Done: the C contract `include/ofxgrip/c/ofxgrip_c.h` (manifest building, a callback table per effect, render context, snapshot, services, bundle exports) and the Rust workspace under `rust/`: `ofxgrip-sys` (raw bindings, links this build or builds the libraries with the `cmake` crate), `ofxgrip` (safe API, `Effect` trait, `bundle!` macro), and `examples/gain-rs`, packaged as `OfxGripGainRs.ofx.bundle` by `OFXGRIP_BUILD_RUST=ON` and tested through the mini host. The crates live in this repository as a workspace; moving them to their own repository is a later decision.
-- Open: Resolve behavior probes for phase 1 and 2 features (presets control, analysis pass through `clipGetImage` in `instanceChanged`, label-mode strings) need an instance on each page.
+- Open: Resolve behavior probes for phase 1 and 2 features (presets control, analysis pass through `clipGetImage` in `instanceChanged`, label-mode strings). Instances now run on the Edit and Fusion pages, so these can be driven.
 
 ### Phase 3: overlays, GPU engine, licensing (built 2026-10-15)
 
@@ -194,4 +194,4 @@ CI runs the same steps on `macos-26` and the build-and-test subset on `ubuntu-24
 | Licensing providers per store (FxFactory, key server); the built-ins are store-neutral | Open, D-010 |
 | CUDA and Vulkan kernel backends | Built; Vulkan verified on two drivers, CUDA on an RTX 5070 Ti with the checked-in PTX |
 | Natron as a second free OFX host | Phase 4 |
-| Computer use (or the developer driving Resolve) for the per-page probes | Phase 1, open |
+| Computer use (or the developer driving Resolve) for the per-page probes | Edit and Fusion pages driven through menu scripts and background input; a Color-page node needs a drag |

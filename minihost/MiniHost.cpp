@@ -1146,11 +1146,11 @@ std::unique_ptr<Instance> MiniHost::createInstance(const std::string& context, c
 			active->erase(name);
 		};
 	}
-	PropSet in;
 	if (!resolvePage.empty()) {
-		in.setString("OfxImageEffectPropResolvePage", resolvePage);
+		// Resolve states the page on the instance and passes the action no arguments.
+		instance->object_->props().setString("OfxImageEffectPropResolvePage", resolvePage);
 	}
-	const OfxStatus status = instance->dispatch(kOfxActionCreateInstance, &in, nullptr);
+	const OfxStatus status = instance->dispatch(kOfxActionCreateInstance, nullptr, nullptr);
 	if (status != kOfxStatOK && status != kOfxStatReplyDefault) {
 		instance->object_->instance = nullptr;
 		return nullptr;

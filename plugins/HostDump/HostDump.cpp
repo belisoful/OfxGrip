@@ -242,7 +242,7 @@ private:
 	{
 		std::ostringstream out;
 		const PropertySet props = ofxServices().instanceProperties();
-		out << "instance dump (" << why << ") page=" << ofxServices().resolvePage() << " type=" << props.getString(kOfxPropType, std::string("<missing>"), 0)
+		out << "instance dump (" << why << ") page=" << ofxServices().resolvePage() << " pageProperty=" << props.getString(resolve::kPropPage, std::string("<missing>"), 0) << " type=" << props.getString(kOfxPropType, std::string("<missing>"), 0)
 		    << " pluginHandle=" << (props.has(kOfxImageEffectPropPluginHandle) ? "present" : "missing") << " context=" << props.getString(kOfxImageEffectPropContext, std::string("<missing>"), 0)
 		    << " frameRate=" << props.getDouble(kOfxImageEffectPropFrameRate, -1.0, 0) << " sequentialRender=" << (props.has(kOfxImageEffectInstancePropSequentialRender) ? "present" : "missing")
 		    << " srcFilePath=" << props.getString(resolve::kPropSourceFilePath, std::string("<missing>"), 0);

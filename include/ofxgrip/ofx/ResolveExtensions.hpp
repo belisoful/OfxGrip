@@ -16,8 +16,8 @@
 OFXGRIP_NAMESPACE_BEGIN
 namespace resolve {
 
-/*! Which Resolve page created the instance: `Edit`, `Color`, or `Fusion`. An in-argument of the
-    create-instance action. */
+/*! Which Resolve page created the instance: `Edit`, `Color`, or `Fusion`. A property of the
+    effect instance. Resolve also creates an instance with an empty page when a project opens. */
 inline constexpr const char* kPropPage = "OfxImageEffectPropResolvePage";
 /*! On the plug-in descriptor, `"true"` means the output of a pixel depends only on that pixel, so
     Resolve may run the effect during LUT generation. */
