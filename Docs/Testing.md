@@ -131,15 +131,17 @@ of a clean unload.
   failure too. They do not prove the pixels a real kernel writes. Three more tests in
   `KernelEngineTests` do, on a real device: they make the primary context of CUDA device 0
   current (`tests/gpu/CudaDeviceContext`), upload frames, and compare the CUDA backend and
-  the CUDA watermark with the CPU. They skip without an NVIDIA driver, without the fixture
-  kernels' PTX, and on a driver older than the toolkit that built the PTX. They passed on an
-  RTX 5070 Ti (driver 595.71, CUDA 13.2) on 2026-11-26 with PTX built on that machine.
+  the CUDA watermark with the CPU. They skip without an NVIDIA driver and on a driver older
+  than the toolkit that built the PTX. They pass on an RTX 5070 Ti (driver 595.71, CUDA 13.2)
+  with the checked-in PTX (2026-11-26).
 - **PTX and driver releases.** A driver loads PTX from a toolkit of its own release or an
   older one, and answers `CUDA_ERROR_UNSUPPORTED_PTX_VERSION` to PTX from a newer one. The
-  PTX of `nvcc` 13.5 (`.version 9.5`) does not load on a CUDA 13.2 driver. A PTX file to
-  check in must come from a toolkit no newer than the oldest driver to support. No PTX is
-  checked in yet. `CudaKernelBackend::accepts` keeps an effect from declaring CUDA on a
-  driver older than its PTX.
+  PTX of `nvcc` 13.5 (`.version 9.5`) does not load on a CUDA 13.2 driver. The checked-in PTX
+  comes from the CUDA 12.8 toolkit (`.version 8.7`, `-arch=compute_75`), the release Resolve
+  21 names as its floor. Rebuild it with that toolkit's `nvcc`, never a newer one.
+  `CudaKernelBackend::accepts` compares the two releases, and a kernel effect declares a GPU
+  path only where its backend runs and loads every kernel's build. A mini host hands out no
+  CUDA frames, so Spot's CUDA render through a host is untested.
 - **InferKit.** `InferKitBackendTests` loads a stand-in library that exports InferKit's C
   interface (`tests/fixtures/inferkit`), so the request, every image form of a result, and
   each failure are tested without the engine.

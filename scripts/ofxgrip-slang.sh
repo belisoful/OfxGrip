@@ -124,8 +124,10 @@ PY
 	fi
 	if [[ "$target" == "cuda" && -n "$nvcc" ]]; then
 		# The prelude includes cuda_fp16.h only under this define, and a kernel with a half
-		# value needs it. nvcc writes CRLF on Windows; the checked-in PTX has LF endings.
-		"$nvcc" --ptx -std=c++17 -DSLANG_CUDA_ENABLE_HALF=1 -I "$script_dir/../external/slang-prelude" "$output_dir/$base.cu" -o "$output_dir/$base.ptx"
+		# value needs it. The half math functions exist from compute_53, and an older nvcc
+		# defaults below that, so the architecture is named. nvcc writes CRLF on Windows; the
+		# checked-in PTX has LF endings.
+		"$nvcc" --ptx -std=c++17 -arch=compute_75 -DSLANG_CUDA_ENABLE_HALF=1 -I "$script_dir/../external/slang-prelude" "$output_dir/$base.cu" -o "$output_dir/$base.ptx"
 		python3 - "$output_dir/$base.ptx" <<'PY'
 import sys
 path = sys.argv[1]

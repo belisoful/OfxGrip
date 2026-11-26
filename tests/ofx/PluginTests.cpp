@@ -1075,17 +1075,18 @@ TEST_F(Rigged, ManifestPropertiesDisableTheFrameworkExtensions)
 
 namespace {
 
-/*! A CUDA backend that refuses every build, as a driver older than the kernel's PTX does. */
-class RefusingBackend final : public KernelBackend {
+/*! A stand-in CUDA backend: absent runtime, a driver that loads the build, or one that refuses it. */
+class StandInBackend final : public KernelBackend {
 public:
-	explicit RefusingBackend(bool available) : available_(available) {}
+	StandInBackend(bool available, bool accepts) : available_(available), accepts_(accepts) {}
 	GpuApi api() const noexcept override { return GpuApi::Cuda; }
 	bool available() const noexcept override { return available_; }
-	bool accepts(const KernelImplementation&) const noexcept override { return false; }
+	bool accepts(const KernelImplementation&) const noexcept override { return accepts_; }
 	Error dispatch(const KernelDispatch&) override { return Error::none(); }
 
 private:
 	bool available_;
+	bool accepts_;
 };
 
 class LineLog final : public LogService {
@@ -1100,7 +1101,7 @@ public:
 
 }  // namespace
 
-TEST(KernelEffectFactory, WithdrawsAGpuPathThisMachineCannotLoad)
+TEST(KernelEffectFactory, DeclaresAGpuPathOnlyWhereItRuns)
 {
 	KernelRecord record;
 	record.name = "Probe";
@@ -1113,23 +1114,37 @@ TEST(KernelEffectFactory, WithdrawsAGpuPathThisMachineCannotLoad)
 	EffectManifest base = testManifest();
 	base.identity.ofxId = "com.belisoful.ofxgrip.test.kernelprobe";
 	base.identity.uuid = "77777777-7777-4777-8777-777777777777";
-	// The constructor registers this build's own backends, so the stand-in goes in after it.
-	KernelEffectFactoryFor<KernelEffect> factory(base, {record});
-	ASSERT_TRUE(factory.manifest().capabilities.cudaRender);
 	const HostProfile profile;
-	LineLog log;
-	// A machine without a driver has no CUDA host, and the declaration stays as the kernels allow.
-	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(false));
-	factory.onLoad(profile, log);
-	EXPECT_TRUE(factory.manifest().capabilities.cudaRender);
-	EXPECT_FALSE(log.contains("declares no cuda render"));
-	// A driver that refuses the build takes the path away.
-	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(true));
-	factory.onLoad(profile, log);
-	EXPECT_FALSE(factory.manifest().capabilities.cudaRender);
-	EXPECT_FALSE(factory.manifest().capabilities.cudaStream);
-	EXPECT_TRUE(log.contains("Kernel Probe: this machine does not load its cuda build, so the effect declares no cuda render"));
-	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(false));
+	struct Case {
+		bool available;
+		bool accepts;
+		bool declared;
+		const char* line;
+	};
+	// A machine without the runtime, a driver that refuses the build, and a driver that loads it.
+	const Case cases[] = {
+	    {false, true, false, "No cuda backend runs on this machine, so the effect declares no cuda render"},
+	    {true, false, false, "Kernel Probe: this machine does not load its cuda build, so the effect declares no cuda render"},
+	    {true, true, true, nullptr},
+	};
+	for (const Case& each : cases) {
+		// The constructor registers this build's own backends, so the stand-in goes in after it.
+		KernelEffectFactoryFor<KernelEffect> factory(base, {record});
+		ASSERT_TRUE(factory.manifest().capabilities.cudaRender);
+		KernelEngine::shared().registerBackend(std::make_unique<StandInBackend>(each.available, each.accepts));
+		LineLog log;
+		factory.onLoad(profile, log);
+		EXPECT_EQ(factory.manifest().capabilities.cudaRender, each.declared);
+		EXPECT_FALSE(factory.manifest().capabilities.cudaStream);
+		EXPECT_EQ(log.contains("declares no cuda render"), !each.declared);
+		if (each.line != nullptr) {
+			EXPECT_TRUE(log.contains(each.line));
+		}
+		// A second load action changes nothing.
+		factory.onLoad(profile, log);
+		EXPECT_EQ(factory.manifest().capabilities.cudaRender, each.declared);
+	}
+	KernelEngine::shared().registerBackend(std::make_unique<StandInBackend>(false, false));
 }
 
 TEST(KernelEffectFactory, TheHostSeesTheWithdrawnPathAtDescribe)
@@ -1148,21 +1163,21 @@ TEST(KernelEffectFactory, TheHostSeesTheWithdrawnPathAtDescribe)
 	EffectManifest base = testManifest();
 	base.identity.ofxId = "com.belisoful.ofxgrip.test.kerneldescribe";
 	base.identity.uuid = "66666666-6666-4666-8666-666666666666";
-	for (const bool refuses : {false, true}) {
+	for (const bool accepts : {true, false}) {
 		auto factory = std::make_unique<KernelEffectFactoryFor<KernelEffect>>(base, std::vector<KernelRecord>{record});
 		ASSERT_TRUE(factory->error().ok()) << factory->error().describe();
 		ASSERT_TRUE(factory->manifest().capabilities.cudaRender);
-		KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(refuses));
+		KernelEngine::shared().registerBackend(std::make_unique<StandInBackend>(true, accepts));
 		const int index = PluginRegistry::instance().registerFactory(std::move(factory));
 		ASSERT_GE(index, 0);
 		MiniHost host(HostOptions::spec());
 		ASSERT_EQ(host.load(PluginRegistry::instance().plugin(index), "/tmp/test.ofx.bundle"), kOfxStatOK);
 		ASSERT_EQ(host.describe(), kOfxStatOK);
 		// The slot copies the manifest at registration, before the load action withdraws the path.
-		EXPECT_EQ(host.descriptorProps()->getString(kOfxImageEffectPropCudaRenderSupported), refuses ? "false" : "true");
+		EXPECT_EQ(host.descriptorProps()->getString(kOfxImageEffectPropCudaRenderSupported), accepts ? "true" : "false");
 		EXPECT_EQ(host.descriptorProps()->getString(kOfxImageEffectPropCPURenderSupported), "true");
 		host.unload();
 		PluginRegistry::instance().clear();
 	}
-	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(false));
+	KernelEngine::shared().registerBackend(std::make_unique<StandInBackend>(false, false));
 }

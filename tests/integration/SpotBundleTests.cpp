@@ -10,6 +10,9 @@
 #include <ofxgrip/gpu/MetalBackend.hpp>
 #endif
 
+#if defined(OFXGRIP_HAS_CUDA)
+#include <ofxgrip/gpu/CudaDriver.hpp>
+#endif
 #if defined(OFXGRIP_HAS_VULKAN)
 #include <ofxgrip/gpu/VulkanBackend.hpp>
 
@@ -120,7 +123,15 @@ TEST_F(SpotBundle, DescribesTheKernelsParametersAndPaths)
 #if defined(OFXGRIP_HAS_METAL)
 	EXPECT_EQ(props->getString(kOfxImageEffectPropMetalRenderSupported), "true");
 #endif
-	EXPECT_EQ(props->getString(kOfxImageEffectPropCudaRenderSupported), "false");
+	// Spot's PTX comes from the CUDA 12.8 toolkit: the effect declares CUDA where a driver of
+	// that release or a newer one is installed.
+	bool cudaRuns = false;
+#if defined(OFXGRIP_HAS_CUDA)
+	if (const cuda::CudaDriver* driver = cuda::CudaDriver::system()) {
+		cudaRuns = driver->version() == 0 || driver->version() >= 12080;
+	}
+#endif
+	EXPECT_EQ(props->getString(kOfxImageEffectPropCudaRenderSupported), cudaRuns ? "true" : "false");
 	EXPECT_EQ(props->getString(kOfxImageEffectPropOpenCLRenderSupported), "false");
 	const ParamSet* params = host_->contextParams(kOfxImageEffectContextFilter);
 	ASSERT_NE(params, nullptr);

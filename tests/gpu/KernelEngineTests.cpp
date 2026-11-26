@@ -211,15 +211,18 @@ TEST(KernelEngine, RegistersTheCpuBackendAndRefusesIncompleteDispatches)
 	ImageBuffer out = image({0, 0, 4, 4}, BitDepth::Float);
 	wrong.destination = cpuImage(out);
 	EXPECT_EQ(engine.run(wrong).code(), ErrorCode::InvalidParameter);
-	// The record carries every embedded build, the Slang source, and the entry name. The
-	// fixtures have no PTX, so the record has no CUDA build.
-	ASSERT_EQ(blur.record.implementations.size(), 3u);
+	// The record carries every embedded build, the Slang source, and the entry name.
+	ASSERT_EQ(blur.record.implementations.size(), 4u);
 	EXPECT_EQ(blur.record.implementations[0].api, GpuApi::Metal);
 	EXPECT_EQ(blur.record.implementations[1].api, GpuApi::Vulkan);
 	EXPECT_FALSE(blur.record.implementations[1].layoutJson.empty());
-	EXPECT_EQ(blur.record.implementations[2].api, GpuApi::None);
-	EXPECT_EQ(blur.record.implementations[2].entryPoint, "fxGripKernel");
-	EXPECT_EQ(blur.catalog.resolve("GripBlur", GpuApi::Cuda, "", ""), nullptr);
+	EXPECT_EQ(blur.record.implementations[2].api, GpuApi::Cuda);
+	EXPECT_FALSE(blur.record.implementations[2].layoutJson.empty());
+	// The PTX comes from the CUDA 12.8 toolkit, so every driver from that release loads it.
+	EXPECT_EQ(cudaToolkitVersionOf(blur.record.implementations[2].source), 12080);
+	EXPECT_EQ(blur.record.implementations[3].api, GpuApi::None);
+	EXPECT_EQ(blur.record.implementations[3].entryPoint, "fxGripKernel");
+	EXPECT_EQ(blur.catalog.resolve("GripBlur", GpuApi::Cuda, "", ""), &blur.catalog.find("GripBlur")->implementations[2]);
 	EXPECT_NE(blur.record.slangSource.find("FxGripShader"), std::string::npos);
 }
 
@@ -842,7 +845,7 @@ struct CudaFrame {
 }  // namespace
 
 // The three tests below run on a real device. They skip on a machine without an NVIDIA driver
-// and in a build without the fixture kernels' PTX.
+// and on a driver older than the toolkit that built the fixture kernels' PTX.
 
 TEST(KernelEngine, CudaBackendMatchesTheCpuBackendOnADevice)
 {
