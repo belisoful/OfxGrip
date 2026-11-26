@@ -3,6 +3,7 @@
 // In-process adapter tests: a test effect registered with the PluginRegistry is driven through
 // the mini host, so every action, service, and quirk path runs without a bundle on disk.
 #include <ofxgrip/gpu/KernelEngine.hpp>
+#include <ofxgrip/ofx/KernelEffect.hpp>
 #include <ofxgrip/minihost/MiniHost.hpp>
 #include <ofxgrip/ofx/Descriptor.hpp>
 #include <ofxgrip/ofx/Plugin.hpp>
@@ -1070,4 +1071,63 @@ TEST_F(Rigged, ManifestPropertiesDisableTheFrameworkExtensions)
 	instance_->setParam("rigMode", {0.0});
 	ASSERT_EQ(instance_->instanceChanged("rigMode"), kOfxStatOK);
 	EXPECT_EQ(numericValue(*instance_, "rigSoftness")[0], 0.5);
+}
+
+namespace {
+
+/*! A CUDA backend that refuses every build, as a driver older than the kernel's PTX does. */
+class RefusingBackend final : public KernelBackend {
+public:
+	explicit RefusingBackend(bool available) : available_(available) {}
+	GpuApi api() const noexcept override { return GpuApi::Cuda; }
+	bool available() const noexcept override { return available_; }
+	bool accepts(const KernelImplementation&) const noexcept override { return false; }
+	Error dispatch(const KernelDispatch&) override { return Error::none(); }
+
+private:
+	bool available_;
+};
+
+class LineLog final : public LogService {
+public:
+	void log(LogLevel, std::string_view message) override { lines.emplace_back(message); }
+	bool contains(std::string_view text) const
+	{
+		return std::any_of(lines.begin(), lines.end(), [text](const std::string& line) { return line.find(text) != std::string::npos; });
+	}
+	std::vector<std::string> lines;
+};
+
+}  // namespace
+
+TEST(KernelEffectFactory, WithdrawsAGpuPathThisMachineCannotLoad)
+{
+	KernelRecord record;
+	record.name = "Probe";
+	record.slangSource = "/* FxGripShader { parameters: [ { id: 21, type: 'float', name: 'Amount', key: 'amount' } ] } */";
+	KernelImplementation cuda;
+	cuda.api = GpuApi::Cuda;
+	cuda.source = "// Cuda compilation tools, release 13.5, V13.5.37";
+	cuda.entryPoint = "fxGripKernel";
+	record.implementations = {cuda};
+	EffectManifest base = testManifest();
+	base.identity.ofxId = "com.belisoful.ofxgrip.test.kernelprobe";
+	base.identity.uuid = "77777777-7777-4777-8777-777777777777";
+	// The constructor registers this build's own backends, so the stand-in goes in after it.
+	KernelEffectFactoryFor<KernelEffect> factory(base, {record});
+	ASSERT_TRUE(factory.manifest().capabilities.cudaRender);
+	const HostProfile profile;
+	LineLog log;
+	// A machine without a driver has no CUDA host, and the declaration stays as the kernels allow.
+	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(false));
+	factory.onLoad(profile, log);
+	EXPECT_TRUE(factory.manifest().capabilities.cudaRender);
+	EXPECT_FALSE(log.contains("declares no cuda render"));
+	// A driver that refuses the build takes the path away.
+	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(true));
+	factory.onLoad(profile, log);
+	EXPECT_FALSE(factory.manifest().capabilities.cudaRender);
+	EXPECT_FALSE(factory.manifest().capabilities.cudaStream);
+	EXPECT_TRUE(log.contains("Kernel Probe: this machine does not load its cuda build, so the effect declares no cuda render"));
+	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(false));
 }

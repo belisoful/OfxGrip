@@ -862,6 +862,9 @@ TEST(KernelEngine, CudaBackendMatchesTheCpuBackendOnADevice)
 	EXPECT_EQ(gpu.layout.form(), KernelBindingForm::Block);
 	CudaKernelBackend backend(driver);
 	ASSERT_TRUE(backend.available());
+	if (!backend.accepts(*gpu.implementation)) {
+		GTEST_SKIP() << "The driver (CUDA " << driver->version() << ") is older than the toolkit that built the PTX (CUDA " << cudaToolkitVersionOf(gpu.implementation->source) << ")";
+	}
 	const RectI bounds{0, 0, 24, 6};
 	for (BitDepth depth : {BitDepth::Float, BitDepth::Half, BitDepth::UInt8, BitDepth::UInt16}) {
 		ImageBuffer first = ramp(bounds, depth);
@@ -928,6 +931,9 @@ TEST(KernelEngine, CudaBackendRendersAWindowAndABlurOnADevice)
 		GTEST_SKIP() << context.unavailableReason();
 	}
 	CudaKernelBackend backend(driver);
+	if (!backend.accepts(*inspect.implementation) || !backend.accepts(*gpuBlur.implementation)) {
+		GTEST_SKIP() << "The driver (CUDA " << driver->version() << ") is older than the toolkit that built the PTX (CUDA " << cudaToolkitVersionOf(inspect.implementation->source) << ")";
+	}
 
 	// Mode 8 fills with `fill`; only the window changes.
 	const RectI bounds{0, 0, 10, 6};

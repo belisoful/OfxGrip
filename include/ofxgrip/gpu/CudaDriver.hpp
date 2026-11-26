@@ -138,9 +138,14 @@ struct CudaDriver {
 	CudaResult (*surfObjectDestroy)(CudaObject object){nullptr};
 	CudaResult (*launchKernel)(void* function, unsigned gridX, unsigned gridY, unsigned gridZ, unsigned blockX, unsigned blockY, unsigned blockZ, unsigned sharedBytes, void* stream, void** parameters, void** extra){nullptr};
 	CudaResult (*streamSynchronize)(void* stream){nullptr};
+	/*! `cuDriverGetVersion`. `complete()` does not require it. */
+	CudaResult (*driverGetVersion)(int* version){nullptr};
 
-	/*! Whether every function is set. */
+	/*! Whether every function a dispatch calls is set. */
 	bool complete() const noexcept;
+	/*! The CUDA release the driver implements, as 1000 × major + 10 × minor (13020 for
+	    13.2). 0 when the driver does not report one. */
+	int version() const noexcept;
 	/*! The machine's driver, initialized, or null when no NVIDIA driver is installed. The
 	    outcome of the first call is kept. */
 	static const CudaDriver* system();

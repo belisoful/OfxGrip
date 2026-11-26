@@ -28,6 +28,15 @@ bool CudaDriver::complete() const noexcept
 	       && launchKernel != nullptr && streamSynchronize != nullptr;
 }
 
+int CudaDriver::version() const noexcept
+{
+	int value = 0;
+	if (driverGetVersion == nullptr || driverGetVersion(&value) != kCudaSuccess || value < 0) {
+		return 0;
+	}
+	return value;
+}
+
 namespace {
 
 #if !defined(__APPLE__)
@@ -86,6 +95,7 @@ bool loadSystemDriver(CudaDriver& driver) noexcept
 	resolve(library, "cuSurfObjectDestroy", driver.surfObjectDestroy);
 	resolve(library, "cuLaunchKernel", driver.launchKernel);
 	resolve(library, "cuStreamSynchronize", driver.streamSynchronize);
+	resolve(library, "cuDriverGetVersion", driver.driverGetVersion);
 	return driver.complete() && driver.init(0) == kCudaSuccess;
 }
 

@@ -128,8 +128,18 @@ of a clean unload.
 - **CUDA.** `CudaBackendTests` drives the backend through a fake driver table that keeps device
   memory, arrays, and texture and surface objects on the host and runs a hook in place of the
   kernel. The tests prove what the backend binds, launches, stores, and releases, on every
-  failure too. They do not prove the pixels a real kernel writes: that needs PTX from `nvcc`
-  and an NVIDIA GPU.
+  failure too. They do not prove the pixels a real kernel writes. Three more tests in
+  `KernelEngineTests` do, on a real device: they make the primary context of CUDA device 0
+  current (`tests/gpu/CudaDeviceContext`), upload frames, and compare the CUDA backend and
+  the CUDA watermark with the CPU. They skip without an NVIDIA driver, without the fixture
+  kernels' PTX, and on a driver older than the toolkit that built the PTX. They passed on an
+  RTX 5070 Ti (driver 595.71, CUDA 13.2) on 2026-11-26 with PTX built on that machine.
+- **PTX and driver releases.** A driver loads PTX from a toolkit of its own release or an
+  older one, and answers `CUDA_ERROR_UNSUPPORTED_PTX_VERSION` to PTX from a newer one. The
+  PTX of `nvcc` 13.5 (`.version 9.5`) does not load on a CUDA 13.2 driver. A PTX file to
+  check in must come from a toolkit no newer than the oldest driver to support. No PTX is
+  checked in yet. `CudaKernelBackend::accepts` keeps an effect from declaring CUDA on a
+  driver older than its PTX.
 - **InferKit.** `InferKitBackendTests` loads a stand-in library that exports InferKit's C
   interface (`tests/fixtures/inferkit`), so the request, every image form of a result, and
   each failure are tested without the engine.

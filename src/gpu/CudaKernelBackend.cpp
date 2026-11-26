@@ -139,6 +139,37 @@ struct Frame {
 
 }  // namespace
 
+int cudaToolkitVersionOf(std::string_view ptx) noexcept
+{
+	constexpr std::string_view kMarker = "Cuda compilation tools, release ";
+	// The line sits in the comment block that opens the module, before any directive.
+	const std::size_t marker = ptx.substr(0, 1024).find(kMarker);
+	if (marker == std::string_view::npos) {
+		return 0;
+	}
+	std::size_t at = marker + kMarker.size();
+	const auto number = [&ptx, &at](int& out) {
+		const std::size_t start = at;
+		long value = 0;
+		while (at < ptx.size() && ptx[at] >= '0' && ptx[at] <= '9' && value < 100000) {
+			value = value * 10 + (ptx[at] - '0');
+			++at;
+		}
+		out = static_cast<int>(value);
+		return at > start && value < 100000;
+	};
+	int major = 0;
+	int minor = 0;
+	if (!number(major) || at >= ptx.size() || ptx[at] != '.') {
+		return 0;
+	}
+	++at;
+	if (!number(minor)) {
+		return 0;
+	}
+	return major * 1000 + minor * 10;
+}
+
 struct CudaKernelBackend::Impl {
 	const CudaDriver* driver{nullptr};
 	mutable std::mutex mutex;
@@ -180,6 +211,16 @@ void CudaKernelBackend::releaseDeviceState()
 bool CudaKernelBackend::available() const noexcept
 {
 	return impl_->driver != nullptr;
+}
+
+bool CudaKernelBackend::accepts(const KernelImplementation& implementation) const noexcept
+{
+	if (impl_->driver == nullptr) {
+		return false;
+	}
+	const int toolkit = cudaToolkitVersionOf(implementation.source);
+	const int driver = impl_->driver->version();
+	return toolkit == 0 || driver == 0 || driver >= toolkit;
 }
 
 std::size_t CudaKernelBackend::cachedModuleCount() const

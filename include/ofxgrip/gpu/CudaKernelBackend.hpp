@@ -27,6 +27,11 @@
 	The PTX is the product of an NVIDIA toolchain: `scripts/ofxgrip-slang.sh --targets cuda
 	--nvcc <path>` emits it. A kernel without a PTX build has no CUDA implementation, and its
 	effect does not declare CUDA to the host.
+
+	A driver loads PTX from a toolkit of its own release or an older one, and refuses PTX
+	from a newer toolkit (`CUDA_ERROR_UNSUPPORTED_PTX_VERSION`). `accepts` compares the two
+	releases, so an effect whose PTX is newer than the installed driver declares no CUDA
+	render and the host hands it another kind of frame.
 */
 #pragma once
 
@@ -34,11 +39,18 @@
 #include <ofxgrip/gpu/KernelEngine.hpp>
 
 #include <memory>
+#include <string_view>
 
 OFXGRIP_NAMESPACE_BEGIN
 
 /*! The name of the constant global the emitted CUDA source declares for the kernel's globals. */
 inline constexpr const char* kCudaGlobalsName = "SLANG_globalParams";
+
+/*! The CUDA release of the toolkit that compiled a PTX module, as 1000 × major + 10 × minor
+    (13050 for 13.5). `nvcc` states it in a comment at the top of the module:
+    `// Cuda compilation tools, release 13.5, V13.5.37`. 0 when the text has no such line.
+    Introduced in OfxGrip 0.5.0. */
+int cudaToolkitVersionOf(std::string_view ptx) noexcept;
 
 /*! The backend. */
 class CudaKernelBackend final : public KernelBackend {
@@ -53,6 +65,10 @@ public:
 	GpuApi api() const noexcept override { return GpuApi::Cuda; }
 	/*! Whether a complete driver is loaded. A current context is checked at dispatch. */
 	bool available() const noexcept override;
+	/*! Whether the driver's release is at least the release of the toolkit that built the
+	    module. A module or a driver that states no release is accepted, and the load decides.
+	    An unavailable backend accepts nothing. */
+	bool accepts(const KernelImplementation& implementation) const noexcept override;
 	Error dispatch(const KernelDispatch& dispatch) override;
 	/*! The number of loaded modules the backend holds. */
 	std::size_t cachedModuleCount() const;

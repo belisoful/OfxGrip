@@ -70,6 +70,15 @@ public:
 	virtual GpuApi api() const noexcept = 0;
 	/*! Whether the backend can run in this process. */
 	virtual bool available() const noexcept = 0;
+	/*! Whether this machine can load a build made for the backend. A kernel effect declares a
+	    GPU path to the host only when its backend accepts every kernel's build. The default
+	    accepts every build.
+	    Introduced in OfxGrip 0.5.0. */
+	virtual bool accepts(const KernelImplementation& implementation) const noexcept
+	{
+		static_cast<void>(implementation);
+		return true;
+	}
 	/*! Runs a dispatch. A GPU backend encodes on the host's queue and returns without waiting. */
 	virtual Error dispatch(const KernelDispatch& dispatch) = 0;
 	/*! Drops what the backend holds on a device or a driver: compiled programs, modules, a

@@ -285,6 +285,26 @@ void KernelEffectFactory::onLoad(const HostProfile&, LogService& log)
 		const bool ready = backend != nullptr && backend->available();
 		log.info("Kernels render CPU frames on " + std::string(toString(cpuAccelerator_)) + (ready ? "" : ": unavailable, the CPU backend renders them"));
 	}
+	// A GPU path stays declared only when this machine's backend loads every kernel's build:
+	// a CUDA driver older than the toolkit that built the PTX refuses it.
+	const auto withdrawUnloadable = [this, &log](GpuApi api, bool& declared) {
+		const KernelBackend* backend = KernelEngine::shared().backend(api);
+		if (!declared || backend == nullptr || !backend->available()) {
+			return;
+		}
+		for (const CompiledKernel& kernel : kernels_.kernels()) {
+			const CompiledKernel::Build* build = kernel.build(api);
+			if (build != nullptr && build->implementation != nullptr && !backend->accepts(*build->implementation)) {
+				declared = false;
+				log.warning("Kernel " + kernel.record.name + ": this machine does not load its " + std::string(toString(api)) + " build, so the effect declares no " + std::string(toString(api)) + " render");
+				return;
+			}
+		}
+	};
+	withdrawUnloadable(GpuApi::Metal, manifest_.capabilities.metalRender);
+	withdrawUnloadable(GpuApi::OpenCL, manifest_.capabilities.openCLRender);
+	withdrawUnloadable(GpuApi::Cuda, manifest_.capabilities.cudaRender);
+	manifest_.capabilities.cudaStream = manifest_.capabilities.cudaStream && manifest_.capabilities.cudaRender;
 	if (error_) {
 		log.error("The kernel effect's manifest is invalid: " + error_.describe());
 	}
