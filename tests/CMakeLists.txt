@@ -46,7 +46,13 @@ add_executable(ofxgrip_core_tests
   core/InferenceDiskCacheTests.cpp
   core/OverlayTests.cpp
   core/WatermarkTests.cpp
-  core/LicensingTests.cpp)
+  core/LicensingTests.cpp
+  core/ColorGamutTests.cpp
+  core/CurveTests.cpp
+  core/PathTests.cpp
+  core/TimecodeTests.cpp
+  core/UrlWhitelistTests.cpp
+  core/ValueDictionaryTests.cpp)
 target_link_libraries(ofxgrip_core_tests PRIVATE OfxGrip::core ofxgrip_test_main)
 target_compile_definitions(ofxgrip_core_tests PRIVATE OFXGRIP_KERNEL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/kernels")
 gtest_discover_tests(ofxgrip_core_tests DISCOVERY_MODE PRE_TEST)

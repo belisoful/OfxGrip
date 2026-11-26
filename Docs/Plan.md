@@ -20,7 +20,7 @@ section 1 and proposed in `Research/Decisions.md`.
 | 2 | **OfxGrip is built before AEGrip.** Resolve free is installed; the Adobe hosts need a subscription. This supersedes the Host Libraries Plan's build order (decision 16, AEGrip first). AEGrip is developed as far as the SDK allows while the subscription waits. | D-008, accepted 2026-10-14 |
 | 3 | The author API is C++. A C contract (`ofxgrip_c.h`) over the same objects and a Rust crate over the C contract follow, so Rust effects and Rust libraries (InferKit's planned C API) can take part. | Host Libraries Plan, decision 15; D-008, accepted 2026-10-14 |
 | 4 | One GPU engine with Slang kernels plus native backends (Metal first on macOS; CUDA, OpenCL, and Vulkan on Windows and Linux; a CPU backend everywhere). The effect declares to the host only the GPU paths where every kernel resolves. | Host Libraries Plan, decisions 11, 13; Slang confirmed 2026-10-14 |
-| 5 | Static linking, hidden visibility, a versioned inline namespace, no Objective-C classes, Metal through metal-cpp. Resolve loads plug-ins in process. | Host Libraries Plan, section 5 |
+| 5 | Static linking, hidden visibility, a versioned inline namespace, no Objective-C classes, Metal through metal-cpp. Resolve loads plug-ins in process. Amended 2026-11-22: a Mac companion module holds Objective-C and Swift code for the Apple-framework subsystems (`Docs/Parity.md` section 5); the static libraries stay free of Objective-C. | Host Libraries Plan, section 5 |
 | 6 | Every render reads one immutable render snapshot built at render start from timed parameter reads. Render paths are thread-safe. | D-002, D-003 |
 | 7 | A headless mini OFX host runs the real action order, really tiles, varies render scale and bit depth, renders concurrently, and can imitate a named host's quirk profile. CI runs it on every platform with sanitizers and a coverage gate. | D-004 |
 | 8 | Host behavior is asked for by quirk key, never by host name. The registry entries compile into a `HostProfile` table; probed capabilities override the table. | D-005 |
@@ -54,7 +54,8 @@ The FxGrip profile (`Research/Analysis/FxGrip.md` §13) divides FxGrip into what
 | Inference seam (`FxGripInferenceBackend`) | `Inference.hpp` (request, result, backend, passthrough, frame cache, runner), `InferenceDiskCache` (the disk tier), and `InferenceEffect`; `InferKitBackend` over InferKit's C interface. The engine runs on the runner's thread, never on the render thread. A Wraz server over HTTP is open. | 4 |
 | I18N, About and Debug menus, instance tracker, regression | Extensions over the event bus. Menus become choice parameters. | 2 |
 | Registrars (`PROPlugInRegistering`) | Bounded plug-in table with one generated `mainEntry` trampoline per plug-in; `OfxGetNumberOfPlugins`/`OfxGetPlugin` from one macro. | 0 |
-| FCPXML, workflow extensions, Space, RealityKit, StoreKit | Not applicable to OFX. The host scripting bridge (D-007) covers Resolve's Lua and Python later. | — |
+| Space, RealityKit, StoreKit, the window and its views, Vision tracking | A Mac companion module in Objective-C, with Swift behind an Objective-C access point where a framework requires it (decided 2026-11-22). `Docs/Parity.md` holds the full matrix and the open design points. | Later |
+| FCPXML, workflow extensions | Specific to Final Cut Pro. The host scripting bridge (D-007) covers Resolve's Lua and Python later. `Docs/Parity.md` section 7 lists the host-neutral parts. | — |
 
 ## 3. Phases
 
@@ -101,7 +102,9 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: the CUDA kernel backend (`CudaDriver`, `CudaKernelBackend`, `CudaWatermark`) over the driver API, resolved at run time, with no toolkit needed to build. Its declarations of the driver's structures and functions were checked against NVIDIA's `cuda.h` 13.4.92. The tests drive it through a fake driver. `scripts/ofxgrip-slang.sh` emits the CUDA source and, with `nvcc`, the PTX; the kernels' CUDA sources and layouts are checked in.
 - Done: the inference seam (`Inference.hpp`, `InferenceEffect`) and the `InferKitBackend` adapter over InferKit 0.4.0's C interface, tested against a stand-in library.
 - Done: `OFXGRIP_AUTHENTICODE_COMMAND` signs each built `.ofx` on Windows. The OpenCL test context falls back to a CPU device, so the OpenCL tests run on pocl.
-- Open: the CUDA backend has not run on an NVIDIA GPU. No PTX exists for the sample or fixture kernels, so no effect declares CUDA yet and no CUDA golden image exists. This needs a machine with `nvcc` and an NVIDIA driver.
+- Done: the CUDA backend on a real device (2026-11-26, RTX 5070 Ti, driver 595.71, CUDA 13.2). Three tests compare the backend and the watermark with the CPU on the device's primary context and pass with PTX built on that machine. `CudaKernelBackend::accepts` keeps an effect from declaring CUDA on a driver older than the toolkit that built its PTX.
+- Done: checked-in PTX for Spot and the fixture kernels, built with the CUDA 12.8 toolkit (`.version 8.7`, `-arch=compute_75`). A driver refuses PTX from a newer toolkit, and 12.8 is the release Resolve 21 names as its floor. A kernel effect declares a GPU path only where its backend runs and loads every kernel's build.
+- Open: Spot's CUDA render through a host. No mini host frame is a CUDA frame, and no live CUDA host has run it. No CUDA golden image exists.
 - Done: the Windows x64 build. MSVC 19.51 builds every target with `/W4 /WX` and the suite passes on `windows-2025` in CI (271 tests; the runner has no Vulkan headers and no OpenCL, so those backends are not built there). The job blocks.
 - Done: a hardware run on Windows 10 with an NVIDIA RTX 5070 Ti (MSVC 19.44, driver 595.71). The Vulkan and OpenCL backends pass their tests on the card, and the Windows branch of the OpenCL loader compiles and runs. The run found that destroying the shared Vulkan device from a static destructor never returns while Windows unloads the plug-in. Device state is now released on the last unload action and never from a static destructor.
 - Open: Windows on Arm. It means an ARM64EC build (`cmake -A ARM64EC`, cargo target `arm64ec-pc-windows-msvc`), because Resolve's Arm host is an ARM64EC process that scans `Win-arm64x`, `Win-arm64ec`, then `Win64` and cannot load a plain ARM64 DLL. No ARM64EC build has been made. The static C runtime on Windows is undecided, and no binary has been signed through `OFXGRIP_AUTHENTICODE_COMMAND` yet.
@@ -109,7 +112,7 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 - Done: no GPU runtime is a load-time dependency. `OpenCLBackend` resolves every OpenCL function from a library opened at run time on every platform, and a plug-in that cannot open it declares no OpenCL render to an OpenCL host. The OpenGL overlay fallback calls through `GlFunctions`, which Linux fills from `libGL.so.1` or `libOpenGL.so.0` at run time. A Linux plug-in needs `libc` and `libm` only, and `scripts/validate-bundle.py` checks that. The Windows path of the OpenCL loader (`OpenCL.dll`) is not compiled in CI, because the runner has no OpenCL headers.
 - Done: the disk tier of the inference cache (`InferenceDiskCache`). A file per output is named by the SHA-256 of the cache signature and the source pixels, so an output survives a restart and is never served for other pixels. FxGrip keeps its cache in the document through `FxGripFrameData`; this tier needs no document state. It is off until an effect sets a byte limit.
 - Open: a Wraz server backend over HTTP, and interactive renders that return before the model finishes. The SHA-256 in `Digest` is portable code at about 200 MB/s; the CPU's SHA instructions would cut the disk tier's lookup cost.
-- Done: a first live run in Natron 2.5 on the Windows machine (2026-11-19, headless `NatronRenderer`). Gain, Spot, and HostDump load, describe with no rejected property, show their parameters, and render correct pixels on the CPU; Spot's Vulkan accelerator matches its CPU render; Natron quits cleanly with the Vulkan device open. Natron offers no OpenCL or CUDA render. The run found two defects, both fixed: HostDump read integer ranges as doubles, which Natron's typed properties refuse, and the CPU sampler read a pixel center one unit in the last place off, which showed as 254 for 255 in an 8-bit write.
+- Done: a first live run in Natron 2.5 on the Windows machine (2026-11-19, headless `NatronRenderer`). Gain, Spot, and HostDump load, describe with no rejected property, show their parameters, and render correct pixels on the CPU; Spot's Vulkan accelerator matches its CPU render; Natron quits cleanly with the Vulkan device open. Natron offers no OpenCL or CUDA render. The run found two defects, both fixed: HostDump read integer ranges as doubles, which Natron's typed properties refuse, and the CPU sampler read a pixel center one unit in the last place off, which the mini host's bit-exact test shows. The 254 seen for 255 in Natron's 8-bit PNG was the writer's dither: a plain white frame with no OfxGrip node gives the same mix (retest 2026-11-22), so an 8-bit Natron write cannot check exact values.
 - Open: live hosts. The Spot overlay in Natron's GUI and every check in Resolve on Windows are not done. No Linux machine with Resolve is known; no OpenFX host ships for Arm Linux.
 
 ## 4. Layout
@@ -118,7 +121,7 @@ Each phase ends with the Full Check green (section 6) and a live run in Resolve 
 OfxGrip/
   CMakeLists.txt  CMakePresets.json  version.txt
   AGENTS.md (CLAUDE.md includes it)  README.md  CONTRIBUTING.md  SECURITY.md  LICENSE
-  Docs/            Plan.md, Architecture.md, Testing.md
+  Docs/            Plan.md, Parity.md, Architecture.md, Testing.md
   cmake/           OfxGripPlugin.cmake (bundle layout, Info.plist), toolchain helpers
   external/openfx/ vendored OpenFX 1.5.1 C headers (BSD-3) and LICENSE.md
   external/metal-cpp/ Apple's metal-cpp (Apache-2.0)
@@ -129,7 +132,8 @@ OfxGrip/
                    Rules, Events, Extension, HostServices, HostProfile, Quirks, RenderSnapshot,
                    Image, Parameters, MetaManager, Preset, Presets, FrameData, I18n, About, Debug,
                    InstanceTracker, Regression, Kernel* (layout, metadata, tile, values, catalog),
-                   Overlay, Licensing, LicensingProviders, Watermark, Digest, Inference, InferenceDiskCache, and the framework
+                   Overlay, Licensing, LicensingProviders, Watermark, Digest, Inference, InferenceDiskCache,
+                   ColorGamut, Timecode, Curve, Path, UrlWhitelist, ValueDictionary, and the framework
                    extensions (Meta, Visibility, Versioning, Analysis, Licensing)
                    (GripTruck candidates, no OFX headers)
     ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,
@@ -185,9 +189,9 @@ CI runs the same steps on `macos-26` and the build-and-test subset on `ubuntu-24
 | metal-cpp: approved and vendored under `external/metal-cpp`; the Metal backend is built | Done |
 | Slang compiler (`slangc`): optional at build time (`OFXGRIP_SLANGC`); generated sources are checked in | Done |
 | Windows and Linux machines with Resolve for live tests | Phase 4, open |
-| A machine with `nvcc` and an NVIDIA GPU, for the kernels' PTX and the CUDA golden images | Phase 4, open |
+| A pinned CUDA toolkit on the Windows machine, for PTX that older drivers load | Done: CUDA 12.8 beside 13.5 |
 | The Vulkan headers: found on the build machine today; vendoring them makes every build carry the Vulkan backend | Open |
 | Licensing providers per store (FxFactory, key server); the built-ins are store-neutral | Open, D-010 |
-| CUDA and Vulkan kernel backends | Built; Vulkan verified on two drivers, CUDA against a fake driver only |
+| CUDA and Vulkan kernel backends | Built; Vulkan verified on two drivers, CUDA on an RTX 5070 Ti with the checked-in PTX |
 | Natron as a second free OFX host | Phase 4 |
 | Computer use (or the developer driving Resolve) for the per-page probes | Phase 1, open |

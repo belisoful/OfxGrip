@@ -25,7 +25,7 @@ OfxGrip is a C++20 framework for OpenFX image-effect plug-ins. It is the OpenFX 
 
 ## Status
 
-Phase 4 is in progress. Built: the Linux build (GCC, tested on x86_64 in CI and on aarch64), the Windows x64 build (MSVC, tested in CI), the Vulkan kernel backend (tested on MoltenVK and on Mesa's software driver), the CUDA kernel backend (tested against a fake driver; it has not yet run on an NVIDIA GPU), and the inference seam. Open: CUDA golden images, a Windows on Arm build, and live Windows and Linux hosts. See `Docs/Plan.md` for the phases and what each ports from FxGrip.
+Phase 4 is in progress. Built: the Linux build (GCC, tested on x86_64 in CI and on aarch64), the Windows x64 build (MSVC, tested in CI), the Vulkan kernel backend (tested on MoltenVK and on Mesa's software driver), the CUDA kernel backend (tested against a fake driver and on an RTX 5070 Ti, with PTX from the CUDA 12.8 toolkit), and the inference seam. Open: a CUDA render through a live host, a Windows on Arm build, and live Windows and Linux hosts. `Docs/Parity.md` tracks parity with FxGrip on macOS. See `Docs/Plan.md` for the phases and what each ports from FxGrip.
 
 ## Requirements
 
@@ -82,6 +82,7 @@ The script copies the bundle into `/Library/OFX/Plugins`. Restart Resolve and lo
 ## Documentation
 
 - `Docs/Plan.md`: phases, the FxGrip-to-OfxGrip mapping, open items.
+- `Docs/Parity.md`: the parity matrix against FxGrip on macOS and the work that remains.
 - `Docs/Architecture.md`: the layering and the main interfaces.
 - `Docs/Testing.md`: the test layers and the mini host.
 - `AGENTS.md`: the coding standard and the Full Check.

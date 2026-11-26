@@ -47,6 +47,12 @@ add_library(ofxgrip_core STATIC
   core/KernelValues.cpp
   core/KernelCatalog.cpp
   core/Overlay.cpp
+  core/ColorGamut.cpp
+  core/Curve.cpp
+  core/Path.cpp
+  core/Timecode.cpp
+  core/UrlWhitelist.cpp
+  core/ValueDictionary.cpp
   core/Digest.cpp
   core/Watermark.cpp
   core/Licensing.cpp

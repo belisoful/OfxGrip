@@ -107,9 +107,10 @@ paraphrase their code. The official OpenFX headers are a separate case.
   `Regression`, the kernel contract (`KernelLayout`, `KernelMetadata`, `KernelTile`,
   `KernelValues`, `KernelCatalog`), the overlay model (`Overlay`), licensing (`Licensing`,
   `LicensingProviders`, `Watermark`, `Digest`), the inference seam (`Inference`,
-  `InferenceDiskCache`), and the framework extensions (`MetaExtension`,
-  `VisibilityExtension`, `VersioningExtension`, `AnalysisExtension`). These are the GripTruck
-  candidates.
+  `InferenceDiskCache`), the value and math modules ported from FxGrip (`ColorGamut`,
+  `Timecode`, `Curve`, `Path`, `UrlWhitelist`, `ValueDictionary`), and the framework
+  extensions (`MetaExtension`, `VisibilityExtension`, `VersioningExtension`,
+  `AnalysisExtension`). These are the GripTruck candidates.
 - `include/ofxgrip/ofx/` — the OpenFX adapter: `Suites`, `PropertySet`, `Actions`, `Descriptor`,
   `Effect`, `KernelEffect`, `InferenceEffect`, `Interact`, `GlFunctions`, `RenderWatermark`,
   `Analysis`, `Plugin`, `OfxHostServices`, `ResolveExtensions`.
@@ -128,7 +129,8 @@ paraphrase their code. The official OpenFX headers are a separate case.
   interface.
 - `kernels/` — `GripKernel.slang`, OfxGrip's copy of the D-009 kernel module.
 - `external/slang-prelude/` — the Slang C++ prelude the CPU backend compiles emitted kernels
-  against (Apache-2.0 with LLVM exception).
+  against, and the Slang CUDA prelude `nvcc` compiles a kernel's PTX against (Apache-2.0 with
+  LLVM exception).
 - `src/core/`, `src/ofx/`, `src/gpu/`, `src/inference/` — implementations, same split.
 - `minihost/` — the headless OFX host (library and `ofxgrip-minihost` CLI).
 - `plugins/` — `HostDump` (probe), `Gain` (sample), and `Spot` (the Slang kernel sample with an
@@ -142,7 +144,7 @@ paraphrase their code. The official OpenFX headers are a separate case.
 - `scripts/` — `install-bundle.sh`, `validate-bundle.py`, `coverage.sh`, `ofxgrip-slang.sh`
   (regenerates a kernel's Metal, C++, SPIR-V, and CUDA outputs and reflection JSON with
   `slangc`, and the PTX with `nvcc`).
-- `Docs/` — `Plan.md`, `Architecture.md`, `Testing.md`.
+- `Docs/` — `Plan.md`, `Parity.md`, `Architecture.md`, `Testing.md`.
 - `external/openfx/`, `external/metal-cpp/`, `external/slang-prelude/` — vendored headers and
   licenses.
 
