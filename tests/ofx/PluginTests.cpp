@@ -1131,3 +1131,38 @@ TEST(KernelEffectFactory, WithdrawsAGpuPathThisMachineCannotLoad)
 	EXPECT_TRUE(log.contains("Kernel Probe: this machine does not load its cuda build, so the effect declares no cuda render"));
 	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(false));
 }
+
+TEST(KernelEffectFactory, TheHostSeesTheWithdrawnPathAtDescribe)
+{
+	KernelRecord record;
+	record.name = "Probe";
+	record.slangSource = "/* FxGripShader { parameters: [ { id: 21, type: 'float', name: 'Amount', key: 'amount' } ] } */";
+	KernelImplementation cpu;
+	cpu.api = GpuApi::None;
+	cpu.entryPoint = "fxGripKernel";
+	KernelImplementation cuda;
+	cuda.api = GpuApi::Cuda;
+	cuda.source = "// Cuda compilation tools, release 13.5, V13.5.37";
+	cuda.entryPoint = "fxGripKernel";
+	record.implementations = {cpu, cuda};
+	EffectManifest base = testManifest();
+	base.identity.ofxId = "com.belisoful.ofxgrip.test.kerneldescribe";
+	base.identity.uuid = "66666666-6666-4666-8666-666666666666";
+	for (const bool refuses : {false, true}) {
+		auto factory = std::make_unique<KernelEffectFactoryFor<KernelEffect>>(base, std::vector<KernelRecord>{record});
+		ASSERT_TRUE(factory->error().ok()) << factory->error().describe();
+		ASSERT_TRUE(factory->manifest().capabilities.cudaRender);
+		KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(refuses));
+		const int index = PluginRegistry::instance().registerFactory(std::move(factory));
+		ASSERT_GE(index, 0);
+		MiniHost host(HostOptions::spec());
+		ASSERT_EQ(host.load(PluginRegistry::instance().plugin(index), "/tmp/test.ofx.bundle"), kOfxStatOK);
+		ASSERT_EQ(host.describe(), kOfxStatOK);
+		// The slot copies the manifest at registration, before the load action withdraws the path.
+		EXPECT_EQ(host.descriptorProps()->getString(kOfxImageEffectPropCudaRenderSupported), refuses ? "false" : "true");
+		EXPECT_EQ(host.descriptorProps()->getString(kOfxImageEffectPropCPURenderSupported), "true");
+		host.unload();
+		PluginRegistry::instance().clear();
+	}
+	KernelEngine::shared().registerBackend(std::make_unique<RefusingBackend>(false));
+}

@@ -359,6 +359,13 @@ private:
 		buildProfile();
 		logger_.info("Loaded " + identifier_ + " " + manifest_.version.toString() + " in host\n" + profile_.describe());
 		factory_->onLoad(profile_, logger_);
+		// The slot describes from its own copy of the manifest, taken at registration. A GPU
+		// path the factory withdrew at load is withdrawn here too.
+		const Capabilities& declared = factory_->manifest().capabilities;
+		manifest_.capabilities.metalRender = manifest_.capabilities.metalRender && declared.metalRender;
+		manifest_.capabilities.openCLRender = manifest_.capabilities.openCLRender && declared.openCLRender;
+		manifest_.capabilities.cudaRender = manifest_.capabilities.cudaRender && declared.cudaRender;
+		manifest_.capabilities.cudaStream = manifest_.capabilities.cudaStream && declared.cudaStream;
 		if (!loaded_) {
 			loadedPlugins.fetch_add(1);
 		}
