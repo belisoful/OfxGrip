@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2026 Belisoful
 // The kernel engine over the two fixture kernels: the CPU backend on every platform, the Metal
-// backend on macOS, the Vulkan backend where a device opens, and the conformance between them:
-// the same dispatch produces the same pixels.
+// backend on macOS, the Vulkan backend where a device opens, the CUDA backend where an NVIDIA
+// device and the kernels' PTX exist, and the conformance between them: the same dispatch
+// produces the same pixels.
 #include <ofxgrip/gpu/CpuKernelBackend.hpp>
+#include <ofxgrip/gpu/CudaDriver.hpp>
+#include <ofxgrip/gpu/CudaKernelBackend.hpp>
+#include <ofxgrip/gpu/CudaWatermark.hpp>
 #include <ofxgrip/gpu/KernelCpu.hpp>
 #include <ofxgrip/gpu/KernelEngine.hpp>
 #include <ofxgrip/core/KernelMetadata.hpp>
 #include <ofxgrip/core/KernelTile.hpp>
+#include <ofxgrip/core/Watermark.hpp>
+
+#include "CudaDeviceContext.hpp"
 
 #if defined(OFXGRIP_HAS_METAL)
 #include <ofxgrip/gpu/MetalBackend.hpp>
@@ -767,3 +774,254 @@ TEST(KernelEngine, VulkanBackendRendersAWindowAndRefusesBadDispatches)
 }
 
 #endif
+
+namespace {
+
+/*! A frame in CUDA device memory, uploaded from a CPU image. A nonzero `padding` gives a pitch
+    the device cannot sample in place. */
+struct CudaFrame {
+	const cuda::CudaDriver& driver;
+	ImageDesc desc;
+	std::size_t pitch{0};
+	cuda::CudaDevicePointer pointer{0};
+
+	CudaFrame(const cuda::CudaDriver& d, const ImageBuffer& source, std::size_t padding = 0) : driver(d), desc(source.desc())
+	{
+		pitch = desc.minimumRowBytes() + padding;
+		const std::size_t height = static_cast<std::size_t>(desc.bounds.height());
+		if (driver.memAlloc(&pointer, pitch * height) != cuda::kCudaSuccess) {
+			pointer = 0;
+			return;
+		}
+		cuda::CudaMemcpy2D copy;
+		copy.sourceType = cuda::kCudaMemoryHost;
+		copy.sourceHost = source.bytes().data();
+		copy.sourcePitch = source.rowBytes();
+		copy.destinationType = cuda::kCudaMemoryDevice;
+		copy.destinationDevice = pointer;
+		copy.destinationPitch = pitch;
+		copy.widthBytes = desc.minimumRowBytes();
+		copy.height = height;
+		EXPECT_EQ(driver.memcpy2D(&copy), cuda::kCudaSuccess);
+	}
+	CudaFrame(const CudaFrame&) = delete;
+	CudaFrame& operator=(const CudaFrame&) = delete;
+	~CudaFrame()
+	{
+		if (pointer != 0) {
+			driver.memFree(pointer);
+		}
+	}
+
+	KernelImage image() const
+	{
+		KernelImage k;
+		k.connected = true;
+		k.gpu.api = GpuApi::Cuda;
+		k.gpu.handle = reinterpret_cast<void*>(static_cast<std::uintptr_t>(pointer));
+		k.gpu.desc = desc;
+		k.gpu.rowBytes = static_cast<std::ptrdiff_t>(pitch);
+		return k;
+	}
+
+	void download(ImageBuffer& out) const
+	{
+		cuda::CudaMemcpy2D copy;
+		copy.sourceType = cuda::kCudaMemoryDevice;
+		copy.sourceDevice = pointer;
+		copy.sourcePitch = pitch;
+		copy.destinationType = cuda::kCudaMemoryHost;
+		copy.destinationHost = out.bytes().data();
+		copy.destinationPitch = out.rowBytes();
+		copy.widthBytes = desc.minimumRowBytes();
+		copy.height = static_cast<std::size_t>(desc.bounds.height());
+		EXPECT_EQ(driver.memcpy2D(&copy), cuda::kCudaSuccess);
+	}
+};
+
+}  // namespace
+
+// The three tests below run on a real device. They skip on a machine without an NVIDIA driver
+// and in a build without the fixture kernels' PTX.
+
+TEST(KernelEngine, CudaBackendMatchesTheCpuBackendOnADevice)
+{
+	const cuda::CudaDriver* driver = cuda::CudaDriver::system();
+	if (driver == nullptr) {
+		GTEST_SKIP() << "No CUDA driver is installed";
+	}
+	Prepared gpu(OFXGRIP_KERNEL(GripInspect), GpuApi::Cuda);
+	if (gpu.implementation == nullptr) {
+		GTEST_SKIP() << "GripInspect has no PTX build";
+	}
+	ofxgrip::testing::CudaDeviceContext context;
+	if (!context.current()) {
+		GTEST_SKIP() << context.unavailableReason();
+	}
+	Prepared cpu(OFXGRIP_KERNEL(GripInspect), GpuApi::None);
+	EXPECT_EQ(gpu.layout.form(), KernelBindingForm::Block);
+	CudaKernelBackend backend(driver);
+	ASSERT_TRUE(backend.available());
+	const RectI bounds{0, 0, 24, 6};
+	for (BitDepth depth : {BitDepth::Float, BitDepth::Half, BitDepth::UInt8, BitDepth::UInt16}) {
+		ImageBuffer first = ramp(bounds, depth);
+		ImageBuffer second = ramp(bounds, BitDepth::Float);
+		ImageBuffer mask = ramp({4, 1, 20, 5}, BitDepth::Float, Components::Alpha);
+		ImageBuffer rampImage = ramp(bounds, depth);
+		CudaFrame firstFrame(*driver, first);
+		CudaFrame secondFrame(*driver, second, 12);
+		CudaFrame maskFrame(*driver, mask);
+		CudaFrame rampFrame(*driver, rampImage);
+		ASSERT_NE(firstFrame.pointer, 0u);
+		ASSERT_NE(secondFrame.pointer, 0u);
+		ASSERT_NE(maskFrame.pointer, 0u);
+		ASSERT_NE(rampFrame.pointer, 0u);
+		for (int mode : {0, 1, 2, 3, 4, 5, 6, 7, 8}) {
+			ImageBuffer cpuOut = image(bounds, BitDepth::Float);
+			KernelDispatch onCpu = cpu.dispatch(inspectValues(mode), 0.5);
+			onCpu.destination = cpuImage(cpuOut);
+			onCpu.sources = {cpuImage(first), cpuImage(second)};
+			onCpu.keyedImages[kRamp] = cpuImage(rampImage);
+			onCpu.keyedImages[kMask] = cpuImage(mask);
+			Error e = KernelEngine::shared().run(onCpu);
+			ASSERT_TRUE(e.ok()) << e.describe() << " mode " << mode << " depth " << toString(depth);
+
+			ImageBuffer gpuOut = image(bounds, BitDepth::Float);
+			CudaFrame outFrame(*driver, gpuOut);
+			ASSERT_NE(outFrame.pointer, 0u);
+			KernelDispatch onGpu = gpu.dispatch(inspectValues(mode), 0.5);
+			onGpu.destination = outFrame.image();
+			onGpu.sources = {firstFrame.image(), secondFrame.image()};
+			onGpu.keyedImages[kRamp] = rampFrame.image();
+			onGpu.keyedImages[kMask] = maskFrame.image();
+			e = backend.dispatch(onGpu);
+			ASSERT_TRUE(e.ok()) << e.describe() << " mode " << mode << " depth " << toString(depth);
+			outFrame.download(gpuOut);
+			for (int y = bounds.y1; y < bounds.y2; ++y) {
+				for (int x = bounds.x1; x < bounds.x2; ++x) {
+					for (std::size_t ch = 0; ch < 4; ++ch) {
+						ASSERT_NEAR(at(cpuOut, x, y, ch), at(gpuOut, x, y, ch), depth == BitDepth::Half ? 0.01f : 0.004f)
+						    << "mode " << mode << " depth " << toString(depth) << " at " << x << "," << y << " channel " << ch;
+					}
+				}
+			}
+		}
+	}
+	EXPECT_EQ(backend.cachedModuleCount(), 1u);
+	backend.releaseDeviceState();
+	EXPECT_EQ(backend.cachedModuleCount(), 0u);
+}
+
+TEST(KernelEngine, CudaBackendRendersAWindowAndABlurOnADevice)
+{
+	const cuda::CudaDriver* driver = cuda::CudaDriver::system();
+	if (driver == nullptr) {
+		GTEST_SKIP() << "No CUDA driver is installed";
+	}
+	Prepared inspect(OFXGRIP_KERNEL(GripInspect), GpuApi::Cuda);
+	Prepared gpuBlur(OFXGRIP_KERNEL(GripBlur), GpuApi::Cuda);
+	if (inspect.implementation == nullptr || gpuBlur.implementation == nullptr) {
+		GTEST_SKIP() << "The fixture kernels have no PTX build";
+	}
+	ofxgrip::testing::CudaDeviceContext context;
+	if (!context.current()) {
+		GTEST_SKIP() << context.unavailableReason();
+	}
+	CudaKernelBackend backend(driver);
+
+	// Mode 8 fills with `fill`; only the window changes.
+	const RectI bounds{0, 0, 10, 6};
+	ImageBuffer out = image(bounds, BitDepth::Float);
+	{
+		CudaFrame outFrame(*driver, out);
+		ASSERT_NE(outFrame.pointer, 0u);
+		KernelDispatch d = inspect.dispatch(inspectValues(8));
+		d.destination = outFrame.image();
+		d.window = {3, 2, 7, 5};
+		const Error e = backend.dispatch(d);
+		ASSERT_TRUE(e.ok()) << e.describe();
+		outFrame.download(out);
+	}
+	EXPECT_FLOAT_EQ(at(out, 3, 2, 0), 0.125f);
+	EXPECT_FLOAT_EQ(at(out, 6, 4, 0), 0.125f);
+	EXPECT_FLOAT_EQ(at(out, 2, 2, 0), 0.0f);
+	EXPECT_FLOAT_EQ(at(out, 7, 2, 0), 0.0f);
+	EXPECT_FLOAT_EQ(at(out, 3, 5, 0), 0.0f);
+
+	// The blur, with a spread and both settings of its specialization constant.
+	Prepared cpuBlur(OFXGRIP_KERNEL(GripBlur), GpuApi::None);
+	const RectI frame{0, 0, 16, 8};
+	ImageBuffer source = ramp(frame, BitDepth::Float);
+	ImageBuffer matte = ramp(frame, BitDepth::Float);
+	CudaFrame sourceFrame(*driver, source);
+	CudaFrame matteFrame(*driver, matte);
+	ASSERT_NE(sourceFrame.pointer, 0u);
+	ASSERT_NE(matteFrame.pointer, 0u);
+	for (bool invert : {false, true}) {
+		KernelValueMap values;
+		values[1] = Value(2.0);
+		values[2] = Value(3);
+		values[3] = Value(invert);
+		values[11] = Value(RGB{1.0, 0.5, 1.0});
+		ImageBuffer cpuOut = image(frame, BitDepth::Float);
+		KernelDispatch onCpu = cpuBlur.dispatch(values);
+		onCpu.destination = cpuImage(cpuOut);
+		onCpu.sources = {cpuImage(source)};
+		onCpu.keyedImages[12] = cpuImage(matte);
+		Error e = KernelEngine::shared().run(onCpu);
+		ASSERT_TRUE(e.ok()) << e.describe();
+		ImageBuffer gpuOut = image(frame, BitDepth::Float);
+		CudaFrame outFrame(*driver, gpuOut);
+		ASSERT_NE(outFrame.pointer, 0u);
+		KernelDispatch onGpu = gpuBlur.dispatch(values);
+		onGpu.destination = outFrame.image();
+		onGpu.sources = {sourceFrame.image()};
+		onGpu.keyedImages[12] = matteFrame.image();
+		e = backend.dispatch(onGpu);
+		ASSERT_TRUE(e.ok()) << e.describe();
+		outFrame.download(gpuOut);
+		for (int y = frame.y1; y < frame.y2; ++y) {
+			for (int x = frame.x1; x < frame.x2; ++x) {
+				for (std::size_t ch = 0; ch < 4; ++ch) {
+					ASSERT_NEAR(at(cpuOut, x, y, ch), at(gpuOut, x, y, ch), 0.004f) << "invert " << invert << " at " << x << "," << y << " channel " << ch;
+				}
+			}
+		}
+	}
+	backend.releaseDeviceState();
+}
+
+TEST(KernelEngine, CudaWatermarkMatchesTheCpuCompositeOnADevice)
+{
+	const cuda::CudaDriver* driver = cuda::CudaDriver::system();
+	if (driver == nullptr) {
+		GTEST_SKIP() << "No CUDA driver is installed";
+	}
+	ofxgrip::testing::CudaDeviceContext context;
+	if (!context.current()) {
+		GTEST_SKIP() << context.unavailableReason();
+	}
+	WatermarkConfiguration configuration = WatermarkConfiguration::unlicensed("I");
+	configuration.angleDegrees = 0;
+	configuration.fontSize = 216;
+	configuration.color = {1, 0, 0, 1};
+	configuration.opacity = 1.0;
+	const Watermark mark(configuration);
+	const RectI bounds{0, 0, 70, 70};
+	const RectI window{10, 20, 60, 50};
+	for (BitDepth depth : {BitDepth::Float, BitDepth::Half, BitDepth::UInt8, BitDepth::UInt16}) {
+		ImageBuffer expected = ramp(bounds, depth);
+		ImageBuffer actual = image(bounds, depth);
+		CudaFrame device(*driver, expected, 12);
+		ASSERT_NE(device.pointer, 0u);
+		mark.composite(expected.view(), window, {70, 70});
+		const Error e = cuda::cudaWatermark(device.image().gpu, window, {70, 70}, {}, mark, driver);
+		ASSERT_TRUE(e.ok()) << e.describe();
+		device.download(actual);
+		const ImageView a = expected.view();
+		const ImageView b = actual.view();
+		for (int y = bounds.y1; y < bounds.y2; ++y) {
+			ASSERT_EQ(std::memcmp(a.pixel(0, y), b.pixel(0, y), expected.desc().minimumRowBytes()), 0) << toString(depth) << " row " << y;
+		}
+	}
+}

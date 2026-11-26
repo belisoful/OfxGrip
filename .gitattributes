@@ -1,2 +1,4 @@
 # Keep the vendored headers out of GitHub's language statistics.
 external/** linguist-vendored
+# A PTX module keeps LF line endings on every platform, so its bytes match the checked-in file.
+*.ptx text eol=lf

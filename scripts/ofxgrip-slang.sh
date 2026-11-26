@@ -28,9 +28,8 @@
 # Outputs, for <kernel>.slang: <kernel>.metal + <kernel>.metal.json, <kernel>.cpp +
 # <kernel>.cpp.json, <kernel>.cu + <kernel>.cuda.json (+ <kernel>.ptx with nvcc), <kernel>.spv +
 # <kernel>.spirv.json. The emitted C++ and CUDA sources include their prelude by its bare name.
-# The C++ compiles against the copy under external/slang-prelude/ on any machine; nvcc finds
-# slang-cuda-prelude.h in the include folder of the slangc install. The outputs are checked in
-# beside the kernel, so a build without slangc uses them unchanged.
+# Both compile against the copies under external/slang-prelude/ on any machine. The outputs are
+# checked in beside the kernel, so a build without slangc uses them unchanged.
 
 set -euo pipefail
 
@@ -112,8 +111,7 @@ for target in "${target_list[@]}"; do
 		-reflection-json "$output_dir/$base.$target.json" -o "$output_dir/$base.$ext"
 	if [[ "$target" == "cpp" || "$target" == "cuda" ]]; then
 		# The emitted source names its prelude by the absolute path of the slangc install. The C++
-		# compiles against OfxGrip's vendored copy and the CUDA against nvcc's include path, so
-		# both name the prelude bare.
+		# and the CUDA compile against OfxGrip's vendored copies, so both name the prelude bare.
 		python3 - "$output_dir/$base.$ext" <<'PY'
 import re, sys
 path = sys.argv[1]
@@ -125,7 +123,16 @@ with open(path, "w", encoding="utf-8") as source:
 PY
 	fi
 	if [[ "$target" == "cuda" && -n "$nvcc" ]]; then
-		slang_include="$(cd "$(dirname "$slangc")/../include" && pwd)"
-		"$nvcc" --ptx -std=c++17 -I "$slang_include" "$output_dir/$base.cu" -o "$output_dir/$base.ptx"
+		# The prelude includes cuda_fp16.h only under this define, and a kernel with a half
+		# value needs it. nvcc writes CRLF on Windows; the checked-in PTX has LF endings.
+		"$nvcc" --ptx -std=c++17 -DSLANG_CUDA_ENABLE_HALF=1 -I "$script_dir/../external/slang-prelude" "$output_dir/$base.cu" -o "$output_dir/$base.ptx"
+		python3 - "$output_dir/$base.ptx" <<'PY'
+import sys
+path = sys.argv[1]
+with open(path, "rb") as module:
+    data = module.read()
+with open(path, "wb") as module:
+    module.write(data.replace(b"\r\n", b"\n"))
+PY
 	fi
 done
