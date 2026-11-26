@@ -108,6 +108,26 @@ public:
 		Phase previous_;
 	};
 
+	/*! Marks a parameter as being written by the calling thread until the scope ends. A host
+	    that reports the plug-in's own write back inside `paramSetValue` (Q-RESOLVE-039) is
+	    recognized through it. Introduced in OfxGrip 0.5.0. */
+	class WriteScope {
+	public:
+		WriteScope(const OfxHostServices& services, ParameterId id) noexcept;
+		~WriteScope();
+		WriteScope(const WriteScope&) = delete;
+		WriteScope& operator=(const WriteScope&) = delete;
+
+	private:
+		bool marked_{false};
+	};
+	/*! Whether the calling thread is inside a host call that writes this instance's parameter.
+	    Introduced in OfxGrip 0.5.0. */
+	bool isWriting(ParameterId id) const noexcept;
+	/*! Whether the calling thread is inside a host call that writes any parameter of this
+	    instance. Introduced in OfxGrip 0.5.0. */
+	bool isWriting() const noexcept;
+
 	const Suites& suites() const noexcept { return suites_; }
 	EventBus& bus() noexcept { return bus_; }
 	const EffectManifest& manifest() const noexcept { return manifest_; }

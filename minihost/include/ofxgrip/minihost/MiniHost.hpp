@@ -73,6 +73,7 @@ struct HostOptions {
 	bool paramCopyNoOp{false};                 /*!< Q-RESOLVE-006 */
 	bool renderDespiteIdentity{false};         /*!< Q-RESOLVE-027 */
 	bool noPluginHandleOnInstance{false};      /*!< Q-RESOLVE-014 */
+	bool changeInsideParamSet{false};          /*!< Q-RESOLVE-039: `paramSetValue` delivers `instanceChanged` before it returns. */
 
 	/*! A spec-conformant host. */
 	static HostOptions spec();

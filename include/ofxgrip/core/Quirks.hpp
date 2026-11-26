@@ -22,7 +22,7 @@ OFXGRIP_NAMESPACE_BEGIN
 
 /*! The quirk keys. Names match the registry's `Key` field. */
 enum class Quirk : std::uint16_t {
-	// DaVinci Resolve (Q-RESOLVE-001 to 038)
+	// DaVinci Resolve (Q-RESOLVE-001 to 039)
 	ResolveEditionDetection = 0,
 	MaskAlwaysConnected,
 	ThreadSuiteDummy,
@@ -61,6 +61,7 @@ enum class Quirk : std::uint16_t {
 	FxFactoryRequiresResolve20,
 	FramesNeededRangeMissingUnconnected,
 	ScriptingEditionLimits,
+	InstanceChangedInsideParamSet,
 
 	// Generic OpenFX host variance (Q-OFX-ANY-001 to 017)
 	LegacyCacheXmlEscaping,

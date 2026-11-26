@@ -569,6 +569,7 @@ struct OfxHostServices::Impl {
 			}
 			const Value& v = pre.value;
 			const OfxParameterSuiteV1* suite = outer_.suites().parameter;
+			const WriteScope writing(outer_, id);
 			OfxStatus status = kOfxStatOK;
 			switch (b->spec.dimensions()) {
 			case 1:
@@ -664,24 +665,33 @@ struct OfxHostServices::Impl {
 		}
 		Error commit() override
 		{
-			std::lock_guard<std::mutex> lock(mutex_);
-			if (!dirty_) {
-				return Error::none();
+			const ParameterBinding* b = nullptr;
+			std::string text;
+			{
+				std::lock_guard<std::mutex> lock(mutex_);
+				if (!dirty_) {
+					return Error::none();
+				}
+				b = outer_.binding(kParameterIdInstanceState);
+				if (b == nullptr) {
+					return Error::make(ErrorCode::NotFound, "The instance state parameter is not bound");
+				}
+				if (!outer_.parameters().canWrite()) {
+					// The write waits for the next phase that allows it; the state stays dirty.
+					return Error::none();
+				}
+				text = encodeState(blobs_);
+				dirty_ = false;
 			}
-			const ParameterBinding* b = outer_.binding(kParameterIdInstanceState);
-			if (b == nullptr) {
-				return Error::make(ErrorCode::NotFound, "The instance state parameter is not bound");
-			}
-			if (!outer_.parameters().canWrite()) {
-				// The write waits for the next phase that allows it; the state stays dirty.
-				return Error::none();
-			}
-			const std::string text = encodeState(blobs_);
+			// Q-RESOLVE-039: the host can deliver instanceChanged inside this call, on this thread,
+			// and that action commits again. The mutex is free across it.
+			const WriteScope writing(outer_, kParameterIdInstanceState);
 			const OfxStatus status = outer_.suites().parameter->paramSetValue(b->handle, text.c_str());
 			if (Error e = statusToError(status, "paramSetValue(state)")) {
+				std::lock_guard<std::mutex> lock(mutex_);
+				dirty_ = true;
 				return e;
 			}
-			dirty_ = false;
 			return Error::none();
 		}
 		void loadFromHost()
@@ -990,6 +1000,54 @@ bool OfxHostServices::Impl::Paths::launch(const std::string& target, bool isPath
 #endif
 }
 thread_local Phase OfxHostServices::threadPhase_ = Phase::None;
+
+namespace {
+
+// Trivially destructible, so no destructor runs in the host's threads when the plug-in unloads.
+struct PendingWrite {
+	const OfxHostServices* services;
+	ParameterId id;
+};
+constexpr int kMaxPendingWrites = 8;
+thread_local PendingWrite t_pendingWrites[kMaxPendingWrites];
+thread_local int t_pendingWriteCount = 0;
+
+}  // namespace
+
+OfxHostServices::WriteScope::WriteScope(const OfxHostServices& services, ParameterId id) noexcept
+{
+	if (t_pendingWriteCount < kMaxPendingWrites) {
+		t_pendingWrites[t_pendingWriteCount++] = PendingWrite{&services, id};
+		marked_ = true;
+	}
+}
+
+OfxHostServices::WriteScope::~WriteScope()
+{
+	if (marked_) {
+		--t_pendingWriteCount;
+	}
+}
+
+bool OfxHostServices::isWriting(ParameterId id) const noexcept
+{
+	for (int i = 0; i < t_pendingWriteCount; ++i) {
+		if (t_pendingWrites[i].services == this && t_pendingWrites[i].id == id) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool OfxHostServices::isWriting() const noexcept
+{
+	for (int i = 0; i < t_pendingWriteCount; ++i) {
+		if (t_pendingWrites[i].services == this) {
+			return true;
+		}
+	}
+	return false;
+}
 
 // ---- OfxHostServices ----------------------------------------------------------------------------
 

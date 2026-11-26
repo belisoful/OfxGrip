@@ -351,6 +351,36 @@ TEST_F(Fixture, InstanceChangedReachesTheEffectAndClicksButtons)
 	EXPECT_EQ(trace().changes.load(), 3);
 }
 
+TEST_F(Fixture, AHostThatReportsThePluginsOwnWriteInsideTheSetCallIsNotHeard)
+{
+	// Q-RESOLVE-039. The state write at the end of createInstance comes back as instanceChanged
+	// before paramSetValue returns.
+	HostOptions options = HostOptions::spec();
+	options.changeInsideParamSet = true;
+	start(options);
+	EXPECT_EQ(trace().creates.load(), 1);
+	EXPECT_EQ(trace().changes.load(), 0);
+	EXPECT_EQ(stringValue(*instance_, kInstanceStateParameterKey).rfind("OGST1:", 0), 0u);
+
+	Effect* effect = static_cast<Effect*>(instance_->props().getPointer(kOfxPropInstanceData));
+	ASSERT_NE(effect, nullptr);
+	{
+		OfxHostServices::PhaseScope scope(effect->ofxServices(), Phase::InstanceChanged);
+		EXPECT_FALSE(effect->ofxServices().isWriting());
+		ASSERT_TRUE(effect->services().parameters().setCurrent(kGain, Value(3.0)).ok());
+		EXPECT_FALSE(effect->ofxServices().isWriting(kGain));
+	}
+	EXPECT_EQ(trace().changes.load(), 0);
+	EXPECT_DOUBLE_EQ(numericValue(*instance_, "gain")[0], 3.0);
+
+	// A change the host reports outside the plug-in's write still arrives, whatever its reason.
+	EXPECT_EQ(instance_->instanceChanged("gain", 0, kOfxChangePluginEdited), kOfxStatOK);
+	EXPECT_EQ(trace().changes.load(), 1);
+	EXPECT_EQ(instance_->instanceChanged("button"), kOfxStatOK);
+	EXPECT_EQ(trace().clicks.load(), 1);
+	EXPECT_EQ(trace().changes.load(), 2);
+}
+
 TEST_F(Fixture, PersistenceSurvivesSyncPrivateData)
 {
 	start();

@@ -189,6 +189,7 @@ Param* ParamSet::define(const std::string& type, const std::string& name)
 		return nullptr;
 	}
 	params_.push_back(std::make_unique<Param>(name, type));
+	params_.back()->setOwner(this);
 	return params_.back().get();
 }
 
@@ -207,6 +208,7 @@ std::unique_ptr<ParamSet> ParamSet::instantiate() const
 	auto out = std::make_unique<ParamSet>();
 	for (const auto& p : params_) {
 		out->params_.push_back(p->instantiate());
+		out->params_.back()->setOwner(out.get());
 	}
 	return out;
 }
@@ -339,6 +341,12 @@ struct ParamSuite {
 		}
 		return kOfxStatOK;
 	}
+	static void notifyPluginSet(Param* p, OfxStatus status)
+	{
+		if (status == kOfxStatOK && p->owner() != nullptr && p->owner()->pluginSetObserver) {
+			p->owner()->pluginSetObserver(p->name());
+		}
+	}
 	static OfxStatus paramSetValue(OfxParamHandle param, ...)
 	{
 		if (param == nullptr) {
@@ -348,6 +356,7 @@ struct ParamSuite {
 		va_start(args, param);
 		const OfxStatus st = writeFrom(Param::from(param), false, 0.0, args);
 		va_end(args);
+		notifyPluginSet(Param::from(param), st);
 		return st;
 	}
 	static OfxStatus paramSetValueAtTime(OfxParamHandle param, OfxTime time, ...)
@@ -359,6 +368,7 @@ struct ParamSuite {
 		va_start(args, time);
 		const OfxStatus st = writeFrom(Param::from(param), true, time, args);
 		va_end(args);
+		notifyPluginSet(Param::from(param), st);
 		return st;
 	}
 	static OfxStatus paramGetNumKeys(OfxParamHandle param, unsigned int* n)

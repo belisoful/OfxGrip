@@ -288,6 +288,10 @@ private:
 			return instanceChanged(*effect, in);
 		case Action::BeginInstanceChanged:
 		case Action::EndInstanceChanged: {
+			if (services.isWriting()) {
+				// Q-RESOLVE-039: the bracket around the report of the plug-in's own write.
+				return kOfxStatOK;
+			}
 			OfxHostServices::PhaseScope scope(services, Phase::InstanceChanged);
 			PlainEvent event(action == Action::BeginInstanceChanged ? EventId::BeginInstanceChanged : EventId::EndInstanceChanged);
 			return statusOf(effect->bus().post(event));
@@ -574,6 +578,11 @@ private:
 			if (id == kParameterIdNone) {
 				// Q-RESOLVE-035: hosts report names the plug-in never declared.
 				logger_.debug("Change for an unknown name ignored: " + args.name);
+				return kOfxStatOK;
+			}
+			if (args.reason == ChangeReason::PluginEdited && services.isWriting(id)) {
+				// Q-RESOLVE-039: the host reports the plug-in's own write inside paramSetValue.
+				// Other hosts send nothing, so the effect hears nothing here either.
 				return kOfxStatOK;
 			}
 			spec = services.parameters().spec(id);

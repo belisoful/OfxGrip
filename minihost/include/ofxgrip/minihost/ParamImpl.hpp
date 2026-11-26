@@ -17,6 +17,7 @@
 #include "ofxParam.h"
 
 #include <map>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -24,6 +25,8 @@
 
 OFXGRIP_NAMESPACE_BEGIN
 namespace minihost {
+
+class ParamSet;
 
 /*! A parameter, descriptor or instance. */
 class Param {
@@ -52,10 +55,15 @@ public:
 	void deleteKey(Time time);
 	void deleteAllKeys();
 
+	/*! The set that owns this parameter. */
+	ParamSet* owner() const noexcept { return owner_; }
+	void setOwner(ParamSet* owner) noexcept { owner_ = owner; }
+
 	OfxParamHandle handle() noexcept { return reinterpret_cast<OfxParamHandle>(this); }
 	static Param* from(OfxParamHandle h) noexcept { return reinterpret_cast<Param*>(h); }
 
 private:
+	ParamSet* owner_{nullptr};
 	std::string name_;
 	std::string type_;
 	PropSet props_;
@@ -77,6 +85,9 @@ public:
 	std::unique_ptr<ParamSet> instantiate() const;
 	int editDepth{0};
 	std::vector<std::string> editNames;
+	/*! Called with a parameter's name after the plug-in sets its value through the suite. The
+	    host imitates Q-RESOLVE-039 with it. */
+	std::function<void(const std::string&)> pluginSetObserver;
 
 	OfxParamSetHandle handle() noexcept { return reinterpret_cast<OfxParamSetHandle>(this); }
 	static ParamSet* from(OfxParamSetHandle h) noexcept { return reinterpret_cast<ParamSet*>(h); }

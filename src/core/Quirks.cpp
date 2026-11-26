@@ -63,6 +63,7 @@ std::vector<QuirkInfo> makeRegistry()
 		{Quirk::FxFactoryRequiresResolve20, "Q-RESOLVE-036", "FxFactoryRequiresResolve20", "registration/loading", {{kResolve, kOpen, kV20}}},
 		{Quirk::FramesNeededRangeMissingUnconnected, "Q-RESOLVE-037", "FramesNeededRangeMissingUnconnected", "clips/masks", {{kResolve, kOpen, kOpen}}},
 		{Quirk::ScriptingEditionLimits, "Q-RESOLVE-038", "ScriptingEditionLimits", "scripting", {{kResolve, kOpen, kOpen}}},
+		{Quirk::InstanceChangedInsideParamSet, "Q-RESOLVE-039", "InstanceChangedInsideParamSet", "parameters", {{kResolve, kOpen, kOpen}}},
 
 		{Quirk::LegacyCacheXmlEscaping, "Q-OFX-ANY-001", "LegacyCacheXmlEscaping", "registration/loading", {{kAny, kOpen, kOpen}}},
 		{Quirk::OptionalSuitesVary, "Q-OFX-ANY-002", "OptionalSuitesVary", "registration/loading", {{kAny, kOpen, kOpen}}},

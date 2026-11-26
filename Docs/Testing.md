@@ -30,6 +30,7 @@ description says, which suites are withheld, and which deviations it imitates:
 | `imageScaleAlwaysOne` | Q-RESOLVE-010 |
 | `nonConformantInstanceType`, `noPluginHandleOnInstance`, `withheldHostProps` | Q-RESOLVE-014 |
 | `renderDespiteIdentity` | Q-RESOLVE-027 |
+| `changeInsideParamSet` | Q-RESOLVE-039 |
 | `withheldSuites` | Q-OFX-ANY-002, Q-OFX-ANY-013 |
 
 Presets: `HostOptions::spec()`, `resolve21()`, `nuke()`, `natron()`. The Resolve preset carries

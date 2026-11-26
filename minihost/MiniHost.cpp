@@ -836,6 +836,7 @@ HostOptions HostOptions::resolve21()
 	o.imageScaleAlwaysOne = true;
 	o.nonConformantInstanceType = true;
 	o.paramCopyNoOp = true;
+	o.changeInsideParamSet = true;
 	o.renderDespiteIdentity = true;
 	o.noPluginHandleOnInstance = true;
 	return o;
@@ -1133,6 +1134,18 @@ std::unique_ptr<Instance> MiniHost::createInstance(const std::string& context, c
 		cp.setInt(kOfxImageClipPropContinuousSamples, 0);
 	}
 	std::unique_ptr<Instance> instance(new Instance(*this, std::move(object), context, project));
+	if (options_.changeInsideParamSet) {
+		// A parameter whose change is being delivered is not reported again, so a plug-in that
+		// answers a change by setting the same parameter ends.
+		Instance* target = instance.get();
+		target->object_->params().pluginSetObserver = [target, active = std::make_shared<std::set<std::string>>()](const std::string& name) {
+			if (!active->insert(name).second) {
+				return;
+			}
+			target->instanceChanged(name, 0, kOfxChangePluginEdited);
+			active->erase(name);
+		};
+	}
 	PropSet in;
 	if (!resolvePage.empty()) {
 		in.setString("OfxImageEffectPropResolvePage", resolvePage);
