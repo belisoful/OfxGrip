@@ -604,6 +604,7 @@ Error parseManifestJson(std::string_view json, EffectManifest& out)
 			cap.hostFrameThreading = c.value("hostFrameThreading", cap.hostFrameThreading);
 			cap.noSpatialAwareness = c.value("noSpatialAwareness", cap.noSpatialAwareness);
 			cap.cpuRender = c.value("cpuFallback", cap.cpuRender);
+			cap.colorManagement = c.value("colorManagement", cap.colorManagement);
 			if (c.contains("depths")) {
 				cap.depths.clear();
 				for (const auto& d : c["depths"]) {
@@ -878,6 +879,9 @@ std::string writeManifestJson(const EffectManifest& m)
 	cap["hostFrameThreading"] = m.capabilities.hostFrameThreading;
 	cap["noSpatialAwareness"] = m.capabilities.noSpatialAwareness;
 	cap["cpuFallback"] = m.capabilities.cpuRender;
+	if (m.capabilities.colorManagement) {
+		cap["colorManagement"] = true;
+	}
 	Json depths = Json::array();
 	for (BitDepth d : m.capabilities.depths) {
 		depths.push_back(std::string(toString(d)));

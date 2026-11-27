@@ -104,6 +104,9 @@ struct HostCapabilities {
 	bool openCLRender{false};
 	bool openGLRender{false};
 	std::string nativeOrigin;               /*!< The host's UI origin property, as a string. */
+	/*! The host names the colourspace of each clip (OpenFX 1.5 colour management in any style).
+	    Introduced in OfxGrip 0.5.0. */
+	bool colourManagement{false};
 	std::vector<std::string> supportedContexts;
 	std::vector<std::string> supportedComponents;
 	std::vector<std::string> supportedPixelDepths;

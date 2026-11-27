@@ -20,6 +20,7 @@
 
 #include "ofxImageEffect.h"
 
+#include <mutex>
 #include <sstream>
 
 namespace {
@@ -53,8 +54,11 @@ EffectManifest makeManifest()
 	m.identity.description = "Records the host's capabilities and behavior to the OfxGrip log. Passes the image through.";
 	m.identity.kind = EffectKind::Filter;
 	m.identity.extraContexts = {EffectKind::General, EffectKind::Generator};
-	m.version = Version{1, 3, 0};
+	m.version = Version{1, 4, 0};
 	m.capabilities.depths = {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float};
+	// The probe declares colour management, so a host that offers it names each clip's
+	// colourspace and the render line records the name (Q-RESOLVE-028).
+	m.capabilities.colorManagement = true;
 #if defined(OFXGRIP_HAS_METAL)
 	m.capabilities.metalRender = true;
 #endif
@@ -176,7 +180,7 @@ public:
 		    << context.args.renderWindow.y1 << "," << context.args.renderWindow.x2 << "," << context.args.renderWindow.y2 << " field=" << toString(context.args.field)
 		    << " draft=" << context.args.draft << " interactive=" << context.args.interactive << " sequential=" << context.args.sequentialStatus << " gpu=" << toString(context.args.gpu)
 		    << " openGL=" << context.args.openGLEnabled << " srcFrame=" << context.args.resolveSourceFrame << " page=" << context.snapshot.info().resolvePage
-		    << " | output bounds=" << o.desc.bounds.x1 << "," << o.desc.bounds.y1 << "," << o.desc.bounds.x2 << "," << o.desc.bounds.y2 << " rod=" << o.desc.regionOfDefinition.x1 << ","
+		    << " colourspace=" << (context.snapshot.info().colourspace.empty() ? "<none>" : context.snapshot.info().colourspace) << " | output bounds=" << o.desc.bounds.x1 << "," << o.desc.bounds.y1 << "," << o.desc.bounds.x2 << "," << o.desc.bounds.y2 << " rod=" << o.desc.regionOfDefinition.x1 << ","
 		    << o.desc.regionOfDefinition.y1 << "," << o.desc.regionOfDefinition.x2 << "," << o.desc.regionOfDefinition.y2 << " depth=" << toString(o.desc.depth)
 		    << " components=" << toString(o.desc.components) << " par=" << o.desc.pixelAspect << " rowBytes=" << o.rowBytes << " premult=" << static_cast<int>(o.desc.premultiplication);
 		for (const InputImage& input : context.inputs) {
@@ -186,9 +190,17 @@ public:
 				    << " depth=" << toString(input.view.desc.depth) << " rowBytes=" << input.view.rowBytes;
 			}
 		}
-		if (!renderLogged_) {
-			services().log().info(out.str());
+		// The first render, and each render whose colourspace name differs from the last one.
+		const std::string& colourspace = context.snapshot.info().colourspace;
+		bool report = false;
+		{
+			std::lock_guard<std::mutex> lock(renderLogMutex_);
+			report = !renderLogged_ || colourspace != lastColourspace_;
 			renderLogged_ = true;
+			lastColourspace_ = colourspace;
+		}
+		if (report) {
+			services().log().info(out.str());
 		} else {
 			services().log().debug(out.str());
 		}
@@ -245,7 +257,8 @@ private:
 		out << "instance dump (" << why << ") page=" << ofxServices().resolvePage() << " pageProperty=" << props.getString(resolve::kPropPage, std::string("<missing>"), 0) << " type=" << props.getString(kOfxPropType, std::string("<missing>"), 0)
 		    << " pluginHandle=" << (props.has(kOfxImageEffectPropPluginHandle) ? "present" : "missing") << " context=" << props.getString(kOfxImageEffectPropContext, std::string("<missing>"), 0)
 		    << " frameRate=" << props.getDouble(kOfxImageEffectPropFrameRate, -1.0, 0) << " sequentialRender=" << (props.has(kOfxImageEffectInstancePropSequentialRender) ? "present" : "missing")
-		    << " srcFilePath=" << props.getString(resolve::kPropSourceFilePath, std::string("<missing>"), 0);
+		    << " srcFilePath=" << props.getString(resolve::kPropSourceFilePath, std::string("<missing>"), 0)
+		    << " colourManagementStyle=" << (ofxServices().profile().capabilities.colourManagement ? props.getString("OfxImageEffectPropColourManagementStyle", std::string("<missing>"), 0) : std::string("<host offers none>"));
 		const std::vector<double> size = props.getDoubles(kOfxImageEffectPropProjectSize);
 		if (size.size() == 2) {
 			out << " projectSize=" << size[0] << "x" << size[1];
@@ -302,7 +315,9 @@ private:
 		}
 	}
 
+	std::mutex renderLogMutex_;
 	bool renderLogged_{false};
+	std::string lastColourspace_;
 	bool gpuLogged_{false};
 };
 

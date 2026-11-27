@@ -65,6 +65,38 @@ void MetalKernelBackend::registerWithEngine()
 	std::call_once(once, []() { KernelEngine::shared().registerBackend(std::make_unique<MetalKernelBackend>()); });
 }
 
+Error MetalKernelBackend::makeScratch(const KernelImage& like, const RectI& bounds, KernelImage& out)
+{
+	if (!like.isGpu() || like.gpu.api != GpuApi::Metal || bounds.empty()) {
+		return Error::make(ErrorCode::InvalidParameter, "A Metal scratch image needs a Metal frame and bounds");
+	}
+	std::shared_ptr<metal::MetalContext> context = metal::MetalContext::forQueue(like.gpu.queue);
+	if (!context) {
+		return Error::make(ErrorCode::MissingHostFeature, "The host passed no Metal command queue");
+	}
+	// Rows of 256-byte multiples meet every device's linear texture alignment, so the buffer
+	// binds as a texture in place.
+	const std::size_t rowBytes = (static_cast<std::size_t>(bounds.width()) * 4 * sizeof(float) + 255) / 256 * 256;
+	metal::MetalBuffer buffer = context->scratch(rowBytes * static_cast<std::size_t>(bounds.height()));
+	if (!buffer.valid()) {
+		return Error::make(ErrorCode::Memory, "No Metal scratch buffer is available");
+	}
+	out = KernelImage{};
+	out.connected = true;
+	out.gpu.api = GpuApi::Metal;
+	out.gpu.device = like.gpu.device;
+	out.gpu.queue = like.gpu.queue;
+	out.gpu.handle = buffer.handle();
+	out.gpu.desc = like.gpu.desc;
+	out.gpu.desc.bounds = bounds;
+	out.gpu.desc.regionOfDefinition = bounds;
+	out.gpu.desc.depth = BitDepth::Float;
+	out.gpu.desc.components = Components::RGBA;
+	out.gpu.rowBytes = static_cast<std::ptrdiff_t>(rowBytes);
+	out.owner = std::make_shared<metal::MetalBuffer>(std::move(buffer));
+	return Error::none();
+}
+
 Error MetalKernelBackend::dispatch(const KernelDispatch& d)
 {
 	const KernelLayout& layout = *d.layout;
@@ -103,6 +135,20 @@ Error MetalKernelBackend::dispatch(const KernelDispatch& d)
 	metal::MetalCommandBuffer command = context->commandBuffer();
 	if (!command.valid()) {
 		return Error::make(ErrorCode::Render, "No Metal command buffer is available");
+	}
+
+	// A scratch image's owner is the pooled buffer `makeScratch` took.
+	const auto retainOwner = [&command](const KernelImage& image) {
+		if (image.owner && image.isGpu()) {
+			command.retain(*std::static_pointer_cast<metal::MetalBuffer>(image.owner));
+		}
+	};
+	retainOwner(d.destination);
+	for (const KernelImage& image : d.sources) {
+		retainOwner(image);
+	}
+	for (const auto& [id, image] : d.keyedImages) {
+		retainOwner(image);
 	}
 
 	// The read textures, in map order, with the tile maps over their bounds.

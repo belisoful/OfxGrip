@@ -74,6 +74,12 @@ struct HostOptions {
 	bool renderDespiteIdentity{false};         /*!< Q-RESOLVE-027 */
 	bool noPluginHandleOnInstance{false};      /*!< Q-RESOLVE-014 */
 	bool changeInsideParamSet{false};          /*!< Q-RESOLVE-039: `paramSetValue` delivers `instanceChanged` before it returns. */
+	/*! The OpenFX 1.5 colour management style the host description offers, for example
+	    `OfxImageEffectColourManagementFull`. Empty offers none (Q-RESOLVE-028). */
+	std::string colourManagementStyle;
+	/*! The colourspace name a new instance's clips state, for a plug-in that declared a
+	    style. `Instance::setColourspace` changes it. */
+	std::string colourspace{"lin_rec709_srgb"};
 
 	/*! A spec-conformant host. */
 	static HostOptions spec();
@@ -179,6 +185,12 @@ public:
 	/*! Connects an input clip to an image. */
 	void setInput(const std::string& clip, std::shared_ptr<const ImageBuffer> image);
 	void disconnect(const std::string& clip);
+	/*! States a colourspace name on every clip that is not a mask. It has an effect only when
+	    the host offers a colour management style and the plug-in declared one. */
+	void setColourspace(const std::string& name);
+	/*! A clip instance's properties, or null for an unknown clip. A test edits them to stand
+	    in for what a host states. */
+	PropSet* clipProps(const std::string& clip);
 	bool isConnected(const std::string& clip) const;
 
 	OfxStatus clipPreferences();

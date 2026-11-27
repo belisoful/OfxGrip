@@ -196,6 +196,20 @@ std::vector<std::string> kernelMetadataBlocks(std::string_view source)
 	return blocks;
 }
 
+ColorSpace KernelColorSpace::resolve(const ColorSpace& host) const noexcept
+{
+	ColorSpace space = host;
+	if (const std::optional<ColorPrimaries> named = colorPrimariesNamed(primaries)) {
+		space.primaries = *named;
+	}
+	if (transfer == kKernelTransferGamma) {
+		space.transfer = host.transfer == ColorTransfer::Linear ? ColorTransfer::Srgb : host.transfer;
+	} else if (const std::optional<ColorTransfer> named = colorTransferNamed(transfer)) {
+		space.transfer = *named;
+	}
+	return space;
+}
+
 Error KernelMetadata::scan(std::string_view source, KernelMetadata& out)
 {
 	KernelMetadata result;
@@ -233,6 +247,12 @@ Error KernelMetadata::scan(std::string_view source, KernelMetadata& out)
 				}
 				if (value.contains("primaries") && value["primaries"].is_string()) {
 					result.colorSpace.primaries = value["primaries"].get<std::string>();
+				}
+				if (result.colorSpace.transfer != kKernelTransferGamma && !colorTransferNamed(result.colorSpace.transfer)) {
+					return Error::make(ErrorCode::InvalidParameter, "The kernel metadata's colorSpace names no transfer").with("transfer", result.colorSpace.transfer);
+				}
+				if (result.colorSpace.primaries != kKernelPrimariesHost && !colorPrimariesNamed(result.colorSpace.primaries)) {
+					return Error::make(ErrorCode::InvalidParameter, "The kernel metadata's colorSpace names no primaries").with("primaries", result.colorSpace.primaries);
 				}
 				continue;
 			}

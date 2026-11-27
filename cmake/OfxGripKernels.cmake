@@ -112,7 +112,10 @@ function(ofxgrip_add_kernels)
     if(NOT MSVC)
       set_source_files_properties("${_adapter}" PROPERTIES COMPILE_OPTIONS "-w")
     endif()
-    target_link_libraries(${OGK_TARGET} PRIVATE OfxGrip::kernels)
+    # The kernels library embeds the conversion kernel itself.
+    if(NOT OGK_TARGET STREQUAL "ofxgrip_kernels")
+      target_link_libraries(${OGK_TARGET} PRIVATE OfxGrip::kernels)
+    endif()
 
     if(_bundle_dir)
       set(_optional_resources)

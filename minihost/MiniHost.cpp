@@ -9,6 +9,8 @@
 #include <ofxgrip/gpu/OpenCLBackend.hpp>
 #endif
 
+#include "ofx-native-v1.5_aces-v1.3_ocio-v2.3.h"
+#include "ofxColour.h"
 #include "ofxDrawSuite.h"
 #include "ofxGPURender.h"
 #include "ofxInteract.h"
@@ -945,6 +947,10 @@ void MiniHost::fillHostProps()
 	p.setString(kOfxImageEffectPropCudaRenderSupported, "false");
 	p.setString(kOfxImageEffectPropOpenCLRenderSupported, options_.openCLRenderSupported ? "true" : "false");
 	p.setString(kOfxImageEffectPropOpenGLRenderSupported, "false");
+	if (!options_.colourManagementStyle.empty()) {
+		p.setString(kOfxImageEffectPropColourManagementStyle, options_.colourManagementStyle);
+		p.setStrings(kOfxImageEffectPropColourManagementAvailableConfigs, {kOfxConfigIdentifier});
+	}
 	for (const std::string& name : options_.withheldHostProps) {
 		p.withhold(name);
 	}
@@ -1134,6 +1140,7 @@ std::unique_ptr<Instance> MiniHost::createInstance(const std::string& context, c
 		cp.setInt(kOfxImageClipPropContinuousSamples, 0);
 	}
 	std::unique_ptr<Instance> instance(new Instance(*this, std::move(object), context, project));
+	instance->setColourspace(options_.colourspace);
 	if (options_.changeInsideParamSet) {
 		// A parameter whose change is being delivered is not reported again, so a plug-in that
 		// answers a change by setting the same parameter ends.
@@ -1428,6 +1435,31 @@ void Instance::setInput(const std::string& clipName, std::shared_ptr<const Image
 		clip->props().setString(kOfxImageClipPropUnmappedComponents, componentsName(img->desc().components));
 		clip->props().setString(kOfxImageEffectPropPreMultiplication, premultName(img->desc().premultiplication));
 	}
+}
+
+void Instance::setColourspace(const std::string& name)
+{
+	// The negotiated style is the plug-in's when the host offers one. A plug-in that declared
+	// none receives no colourspace names.
+	const PropSet* descriptor = host_.descriptorProps();
+	const std::string declared = descriptor == nullptr ? std::string(kOfxImageEffectColourManagementNone) : descriptor->getString(kOfxImageEffectPropColourManagementStyle, kOfxImageEffectColourManagementNone);
+	const bool managed = !host_.options().colourManagementStyle.empty() && declared != kOfxImageEffectColourManagementNone;
+	object_->props().setString(kOfxImageEffectPropColourManagementStyle, managed ? host_.options().colourManagementStyle : std::string(kOfxImageEffectColourManagementNone));
+	if (!managed) {
+		return;
+	}
+	object_->props().setString(kOfxImageEffectPropColourManagementConfig, kOfxConfigIdentifier);
+	for (const auto& clip : object_->clips()) {
+		if (clip->props().getInt(kOfxImageClipPropIsMask, 0) == 0) {
+			clip->props().setString(kOfxImageClipPropColourspace, name);
+		}
+	}
+}
+
+PropSet* Instance::clipProps(const std::string& clipName)
+{
+	Clip* clip = object_->clip(clipName);
+	return clip == nullptr ? nullptr : &clip->props();
 }
 
 void Instance::disconnect(const std::string& clipName)

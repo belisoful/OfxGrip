@@ -220,6 +220,11 @@ Error KernelEffect::dispatchBuild(RenderContext& context, const CompiledKernel& 
 	}
 	dispatch.threading = &services().threading();
 	dispatch.abort = [&context]() { return context.abortRequested(); };
+	if (const std::optional<ColorSpace> host = context.snapshot.colorSpace()) {
+		const ColorSpace working = kernel->metadata.colorSpace.resolve(*host);
+		dispatch.color.toKernel = colorConversion(*host, working);
+		dispatch.color.toHost = colorConversion(working, *host);
+	}
 	onPrepareDispatch(dispatch, *kernel);
 	return KernelEngine::shared().run(dispatch);
 }
@@ -311,6 +316,18 @@ void KernelEffectFactory::onLoad(const HostProfile&, LogService& log)
 	withdrawUnloadable(GpuApi::Metal, manifest_.capabilities.metalRender);
 	withdrawUnloadable(GpuApi::OpenCL, manifest_.capabilities.openCLRender);
 	withdrawUnloadable(GpuApi::Cuda, manifest_.capabilities.cudaRender);
+	// A colour-managed effect converts around its kernels, so a GPU path also needs the
+	// conversion kernel's build.
+	const auto withdrawUnconverted = [this, &log](GpuApi api, bool& declared) {
+		if (!declared || !manifest_.capabilities.colorManagement || KernelEngine::shared().convertsColorOn(api)) {
+			return;
+		}
+		declared = false;
+		const std::string name(toString(api));
+		log.warning("No colourspace conversion runs on " + name + " on this machine, so the effect declares no " + name + " render");
+	};
+	withdrawUnconverted(GpuApi::Metal, manifest_.capabilities.metalRender);
+	withdrawUnconverted(GpuApi::Cuda, manifest_.capabilities.cudaRender);
 	manifest_.capabilities.cudaStream = manifest_.capabilities.cudaStream && manifest_.capabilities.cudaRender;
 	if (error_) {
 		log.error("The kernel effect's manifest is invalid: " + error_.describe());

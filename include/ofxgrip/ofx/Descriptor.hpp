@@ -61,6 +61,12 @@ Error lowerContextDescriptor(const EffectManifest& manifest, const HostProfile& 
 std::vector<ParameterSpec> frameworkParameters(const EffectManifest& manifest = {}, bool debugAllowed = true);
 
 /*! The OpenFX names and IDs of the framework menus. */
+/*! The Color Space menu of an effect whose manifest declares `colorManagement`: `Automatic`,
+    then `colorSpaceChoices()` in order. `Automatic` follows the host's colourspace name. Any
+    other choice names the colourspace itself, for a host that reports none (Q-RESOLVE-028).
+    Introduced in OfxGrip 0.5.0. */
+inline constexpr const char* kColorSpaceParameterKey = "ofxgrip_colorspace";
+inline constexpr ParameterId kParameterIdColorSpace = 9992;
 inline constexpr const char* kAboutMenuParameterKey = "ofxgrip_about";
 inline constexpr ParameterId kParameterIdAboutMenu = 9993;
 inline constexpr const char* kDebugMenuParameterKey = "ofxgrip_debug";

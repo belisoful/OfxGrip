@@ -33,6 +33,8 @@ public:
 	    and every source must be CPU views. Fails with `InvalidParameter` when the implementation
 	    has no CPU entry or its layout is not a block layout. */
 	Error dispatch(const KernelDispatch& dispatch) override;
+	/*! An image buffer in memory. Introduced in OfxGrip 0.5.0. */
+	Error makeScratch(const KernelImage& like, const RectI& bounds, KernelImage& out) override;
 };
 
 OFXGRIP_NAMESPACE_END

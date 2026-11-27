@@ -162,7 +162,7 @@ std::string HostProfile::describe() const
 	    << " choiceAnim=" << capabilities.supportsChoiceAnimation << " boolAnim=" << capabilities.supportsBooleanAnimation
 	    << " stringAnim=" << capabilities.supportsStringAnimation << " customAnim=" << capabilities.supportsCustomAnimation
 	    << " strChoice=" << capabilities.supportsStrChoice << " maxParams=" << capabilities.maxParameters
-	    << " maxPages=" << capabilities.maxPages << " metal=" << capabilities.metalRender << " cuda=" << capabilities.cudaRender
+	    << " maxPages=" << capabilities.maxPages << " colourManagement=" << capabilities.colourManagement << " metal=" << capabilities.metalRender << " cuda=" << capabilities.cudaRender
 	    << " opencl=" << capabilities.openCLRender << " opengl=" << capabilities.openGLRender
 	    << " nativeOrigin=" << (capabilities.nativeOrigin.empty() ? std::string("<missing>") : capabilities.nativeOrigin)
 	    << " contexts=" << capabilities.supportedContexts.size() << " components=" << capabilities.supportedComponents.size() << " depths=" << capabilities.supportedPixelDepths.size();

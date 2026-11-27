@@ -314,6 +314,10 @@ TEST(KernelMetadata, ScansSeveralBlocksAndRejectsBrokenOnes)
 	EXPECT_EQ(KernelMetadata::scan("/* FxGripShader { parameters: 3 } */", out).code(), ErrorCode::InvalidParameter);
 	EXPECT_EQ(KernelMetadata::scan("/* FxGripShader { note: 1 } */\n/* FxGripShader { note: 2 } */", out).code(), ErrorCode::InvalidParameter);
 	EXPECT_EQ(KernelMetadata::scan("/* FxGripShader { colorSpace: 1 } */", out).code(), ErrorCode::InvalidParameter);
+	EXPECT_EQ(KernelMetadata::scan("/* FxGripShader { colorSpace: { transfer: 'log' } } */", out).code(), ErrorCode::InvalidParameter);
+	EXPECT_EQ(KernelMetadata::scan("/* FxGripShader { colorSpace: { primaries: 'adobe' } } */", out).code(), ErrorCode::InvalidParameter);
+	EXPECT_TRUE(KernelMetadata::scan("/* FxGripShader { colorSpace: { transfer: 'gamma', primaries: 'ACEScg' } } */", out).ok());
+	EXPECT_TRUE(KernelMetadata::scan("/* FxGripShader { colorSpace: { transfer: 'PQ', primaries: 'host' } } */", out).ok());
 	EXPECT_EQ(KernelMetadata::scan("/* FxGripShader { parameters: [ { id: 1, type: 'point', key: 'p', constant: true } ] } */", out).code(), ErrorCode::InvalidParameter);
 	EXPECT_EQ(KernelMetadata::scan("/* FxGripShader { parameters: [ { id: 1, type: 'float', key: 'p', constant: true } ] } */", out).code(), ErrorCode::InvalidParameter);
 	EXPECT_TRUE(KernelMetadata::scan("/* FxGripShader { parameters: [ { id: 1, type: 'float', key: 'p', constant: true, allowContinuousConstant: true } ] } */", out).ok());
@@ -516,4 +520,35 @@ TEST(KernelCatalog, ResolvesTheMostSpecificImplementation)
 	EXPECT_FALSE(declared.cpuRender);
 	EXPECT_EQ(KernelImplementation{}.specificity(), 1);
 	EXPECT_FALSE(currentOsName().empty());
+}
+
+TEST(KernelMetadata, AKernelColorSpaceResolvesAgainstTheHosts)
+{
+	const ColorSpace srgb{ColorPrimaries::Rec709, ColorTransfer::Srgb};
+	const ColorSpace acescg{ColorPrimaries::AcesAp1, ColorTransfer::Linear};
+	const ColorSpace pq{ColorPrimaries::Rec2020, ColorTransfer::Pq};
+
+	// The default: linear light in the host's gamut.
+	KernelColorSpace space;
+	EXPECT_EQ(space.resolve(srgb), (ColorSpace{ColorPrimaries::Rec709, ColorTransfer::Linear}));
+	EXPECT_EQ(space.resolve(acescg), acescg);
+	EXPECT_EQ(space.resolve(pq), (ColorSpace{ColorPrimaries::Rec2020, ColorTransfer::Linear}));
+
+	// Gamma keeps an encoded host's curve and encodes a linear host with sRGB.
+	space.transfer = "gamma";
+	EXPECT_EQ(space.resolve(srgb), srgb);
+	EXPECT_EQ(space.resolve(pq), pq);
+	EXPECT_EQ(space.resolve(acescg), (ColorSpace{ColorPrimaries::AcesAp1, ColorTransfer::Srgb}));
+
+	// Named primaries and a named transfer replace the host's.
+	space.primaries = "rec2020";
+	space.transfer = "linear";
+	EXPECT_EQ(space.resolve(srgb), (ColorSpace{ColorPrimaries::Rec2020, ColorTransfer::Linear}));
+	space.transfer = "hlg";
+	EXPECT_EQ(space.resolve(acescg), (ColorSpace{ColorPrimaries::Rec2020, ColorTransfer::Hlg}));
+
+	// A name the scanner would reject keeps the host's value.
+	space.primaries = "nonsense";
+	space.transfer = "nonsense";
+	EXPECT_EQ(space.resolve(pq), pq);
 }

@@ -274,8 +274,19 @@ RenderSnapshot Effect::buildSnapshot(const RenderInfo& info)
 	RenderSnapshotBuilder builder;
 	RenderInfo full = info;
 	full.resolvePage = services_->resolvePage();
-	builder.setInfo(full);
 	ParameterService& params = services_->parameters();
+	if (services_->binding(kParameterIdColorSpace) != nullptr) {
+		// A choice other than Automatic names the colourspace itself (Q-RESOLVE-028).
+		Value choice;
+		if (params.get(kParameterIdColorSpace, info.time, choice).ok()) {
+			const std::span<const ColorSpaceChoice> choices = colorSpaceChoices();
+			const int index = choice.toInt(0);
+			if (index >= 1 && static_cast<std::size_t>(index) <= choices.size()) {
+				full.colourspace = std::string(choices[static_cast<std::size_t>(index) - 1].ofxName);
+			}
+		}
+	}
+	builder.setInfo(full);
 	for (const auto& [id, binding] : services_->bindings()) {
 		if (!binding.spec.hasState()) {
 			continue;

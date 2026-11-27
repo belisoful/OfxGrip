@@ -661,6 +661,39 @@ TEST_F(CudaBackend, BindsAMisalignedFrameThroughAnArray)
 	EXPECT_EQ(firstType, kCudaResourceArray);
 }
 
+TEST_F(CudaBackend, AScratchImageIsDeviceMemoryItsOwnerFrees)
+{
+	CudaKernelBackend backend(&driver_);
+	DeviceFrame like({0, 0, 8, 8}, BitDepth::UInt8, Components::RGBA);
+	void* stream = reinterpret_cast<void*>(std::uintptr_t{0x77});
+	const std::size_t before = fake_.memory.size();
+	KernelImage scratch;
+	ASSERT_TRUE(backend.makeScratch(like.image(stream), {2, 1, 7, 5}, scratch).ok());
+	EXPECT_EQ(fake_.memory.size(), before + 1);
+	EXPECT_TRUE(scratch.connected);
+	EXPECT_EQ(scratch.gpu.api, GpuApi::Cuda);
+	EXPECT_EQ(scratch.gpu.queue, stream);
+	EXPECT_NE(scratch.gpu.handle, nullptr);
+	EXPECT_EQ(scratch.bounds(), (RectI{2, 1, 7, 5}));
+	EXPECT_EQ(scratch.desc().depth, BitDepth::Float);
+	EXPECT_EQ(scratch.desc().components, Components::RGBA);
+	EXPECT_EQ(scratch.gpu.rowBytes, 5 * 16);
+	// A copy shares the memory. The last copy frees it.
+	KernelImage copy = scratch;
+	scratch = KernelImage{};
+	EXPECT_EQ(fake_.memory.size(), before + 1);
+	copy = KernelImage{};
+	EXPECT_EQ(fake_.memory.size(), before);
+
+	KernelImage none;
+	EXPECT_EQ(backend.makeScratch(like.image(stream), RectI{}, none).code(), ErrorCode::InvalidParameter);
+	EXPECT_EQ(backend.makeScratch(KernelImage{}, {0, 0, 4, 4}, none).code(), ErrorCode::InvalidParameter);
+	fake_.failOn = "memAlloc";
+	EXPECT_EQ(backend.makeScratch(like.image(stream), {0, 0, 4, 4}, none).code(), ErrorCode::Memory);
+	CudaKernelBackend absent(nullptr);
+	EXPECT_EQ(absent.makeScratch(like.image(stream), {0, 0, 4, 4}, none).code(), ErrorCode::MissingHostFeature);
+}
+
 TEST_F(CudaBackend, RefusesWhatItCannotRun)
 {
 	CudaKernelBackend backend(&driver_);

@@ -31,6 +31,7 @@ description says, which suites are withheld, and which deviations it imitates:
 | `nonConformantInstanceType`, `noPluginHandleOnInstance`, `withheldHostProps` | Q-RESOLVE-014 |
 | `renderDespiteIdentity` | Q-RESOLVE-027 |
 | `changeInsideParamSet` | Q-RESOLVE-039 |
+| `colourManagementStyle` (empty offers none), `colourspace` | Q-RESOLVE-028 |
 | `withheldSuites` | Q-OFX-ANY-002, Q-OFX-ANY-013 |
 
 Presets: `HostOptions::spec()`, `resolve21()`, `nuke()`, `natron()`. The Resolve preset carries

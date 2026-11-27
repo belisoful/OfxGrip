@@ -108,7 +108,7 @@ target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::kernels ofxgrip_test
 if(APPLE)
   target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::gpu_metal)
 endif()
-target_sources(ofxgrip_kernel_tests PRIVATE gpu/CudaBackendTests.cpp gpu/CudaDeviceContext.cpp)
+target_sources(ofxgrip_kernel_tests PRIVATE gpu/KernelColorTests.cpp gpu/CudaBackendTests.cpp gpu/CudaDeviceContext.cpp)
 target_link_libraries(ofxgrip_kernel_tests PRIVATE OfxGrip::gpu_cuda ${CMAKE_DL_LIBS})
 target_compile_definitions(ofxgrip_kernel_tests PRIVATE OFXGRIP_KERNEL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/kernels")
 if(TARGET ofxgrip_gpu_vulkan)

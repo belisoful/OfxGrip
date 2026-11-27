@@ -192,3 +192,49 @@ TEST(ColorGamut, OpenFxColourspaceNames)
 	EXPECT_FALSE(colorSpaceNamed("arri_logc4").has_value());
 	EXPECT_FALSE(colorSpaceNamed("").has_value());
 }
+
+TEST(ColorGamut, TheColourspaceMenuResolvesEveryName)
+{
+	const std::span<const ColorSpaceChoice> choices = colorSpaceChoices();
+	ASSERT_GE(choices.size(), 11u);
+	// The order is persisted by index (Q-OFX-ANY-007).
+	EXPECT_EQ(choices[0].ofxName, "srgb_display");
+	EXPECT_EQ(choices[1].ofxName, "rec1886_rec709_display");
+	EXPECT_EQ(choices[9].ofxName, "ACEScg");
+	for (const ColorSpaceChoice& choice : choices) {
+		EXPECT_TRUE(colorSpaceNamed(choice.ofxName).has_value()) << choice.ofxName;
+		EXPECT_FALSE(choice.label.empty());
+	}
+}
+
+TEST(ColorGamut, AConversionDecodesConvertsAndEncodes)
+{
+	const ColorSpace srgb{ColorPrimaries::Rec709, ColorTransfer::Srgb};
+	const ColorSpace linear709{ColorPrimaries::Rec709, ColorTransfer::Linear};
+	const ColorSpace pq2020{ColorPrimaries::Rec2020, ColorTransfer::Pq};
+
+	EXPECT_TRUE(colorConversion(srgb, srgb).isIdentity());
+	EXPECT_EQ(colorConversion(srgb, srgb), ColorConversion{});
+	const ColorVector color{0.25, 0.5, 0.75};
+	EXPECT_EQ(colorConversion(pq2020, pq2020).apply(color), color);
+
+	const ColorConversion decode = colorConversion(srgb, linear709);
+	EXPECT_FALSE(decode.isIdentity());
+	EXPECT_EQ(decode.decode, ColorTransfer::Srgb);
+	EXPECT_EQ(decode.encode, ColorTransfer::Linear);
+	EXPECT_EQ(decode.matrix, ColorMatrix::identity());
+	const ColorVector linear = decode.apply(color);
+	for (std::size_t i = 0; i < 3; ++i) {
+		EXPECT_DOUBLE_EQ(linear[i], toLinear(ColorTransfer::Srgb, color[i]));
+	}
+
+	const ColorConversion wide = colorConversion(srgb, pq2020);
+	EXPECT_EQ(wide.matrix, gamutConversionMatrix(ColorPrimaries::Rec709, ColorPrimaries::Rec2020));
+	const ColorVector there = wide.apply(color);
+	const ColorVector back = colorConversion(pq2020, srgb).apply(there);
+	for (std::size_t i = 0; i < 3; ++i) {
+		EXPECT_NEAR(back[i], color[i], 1e-9);
+	}
+	// A matrix alone is a conversion too.
+	EXPECT_FALSE(colorConversion(linear709, ColorSpace{ColorPrimaries::AcesAp1, ColorTransfer::Linear}).isIdentity());
+}

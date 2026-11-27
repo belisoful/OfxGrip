@@ -21,6 +21,7 @@
 */
 #pragma once
 
+#include <ofxgrip/core/ColorGamut.hpp>
 #include <ofxgrip/core/Error.hpp>
 #include <ofxgrip/core/Manifest.hpp>
 #include <ofxgrip/core/Types.hpp>
@@ -43,10 +44,27 @@ inline constexpr std::string_view kKernelMetaDerivedKey = "kernelDerivedKey";
 /*! The word that marks a metadata block. */
 inline constexpr std::string_view kKernelMetadataMarker = "FxGripShader";
 
-/*! The color space a kernel computes in. `primaries` is `host` when the block declares none. */
+/*! The transfer value for a kernel that computes on encoded components. */
+inline constexpr std::string_view kKernelTransferGamma = "gamma";
+/*! The primaries value for a kernel that accepts the host's primaries. */
+inline constexpr std::string_view kKernelPrimariesHost = "host";
+
+/*! The color space a kernel computes in.
+
+    - `transfer` → `linear`, `gamma`, or a transfer name `colorTransferNamed` knows.
+    - `primaries` → `host`, or a gamut name `colorPrimariesNamed` knows. It is `host` when the
+      block declares none.
+
+    The scanner rejects any other value. */
 struct KernelColorSpace {
 	std::string transfer{"linear"};
 	std::string primaries{"host"};
+
+	/*! The space the kernel computes in on a host whose frames are in `host`. `host` primaries
+	    keep the host's gamut. `gamma` keeps the host's transfer when the host's frames are
+	    encoded, and is sRGB when they are linear. An unknown name keeps the host's value.
+	    Introduced in OfxGrip 0.5.0. */
+	ColorSpace resolve(const ColorSpace& host) const noexcept;
 	bool operator==(const KernelColorSpace&) const = default;
 };
 

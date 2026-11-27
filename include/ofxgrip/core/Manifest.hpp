@@ -220,6 +220,10 @@ struct Capabilities {
 	bool cudaStream{false};
 	bool openCLRender{false};
 	bool openGLRender{false};
+	/*! The effect reads the colourspace of its frames. The adapter declares OpenFX colour
+	    management where the host offers it and adds the Color Space parameter, and the render
+	    snapshot carries the colourspace name. Introduced in OfxGrip 0.5.0. */
+	bool colorManagement{false};
 	bool operator==(const Capabilities&) const = default;
 };
 

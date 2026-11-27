@@ -11,9 +11,15 @@
 	API, and by the dispatch's accelerator for a CPU destination. Every backend fills the same `GripTile`, binds the same roles, and writes the same
 	pixels within the tolerance the conformance tests state, so an effect renders alike on every
 	path. Host libraries plan, section 10.
+
+	A dispatch can carry a colourspace conversion (`KernelColorPass`). The engine then converts
+	each color source into a scratch image, runs the kernel into a scratch destination, and
+	converts the result into the real destination. The conversion is the embedded
+	`GripColorConvert` kernel (`KernelColor.hpp`), so it runs on the frame's own backend.
 */
 #pragma once
 
+#include <ofxgrip/core/ColorGamut.hpp>
 #include <ofxgrip/core/Error.hpp>
 #include <ofxgrip/core/HostServices.hpp>
 #include <ofxgrip/core/Image.hpp>
@@ -36,9 +42,27 @@ struct KernelImage {
 	bool connected{false};
 	GpuImage gpu;
 	ImageView cpu;
+	/*! What keeps a scratch image's pixels alive. Null for a host frame. A GPU backend holds
+	    the owner of every image it binds until its encoded work completes. Introduced in
+	    OfxGrip 0.5.0. */
+	std::shared_ptr<void> owner;
 	bool isGpu() const noexcept { return gpu.api != GpuApi::None; }
 	/*! The bounds of whichever form is set. */
 	RectI bounds() const noexcept { return isGpu() ? gpu.desc.bounds : cpu.desc.bounds; }
+	/*! The layout of whichever form is set. Introduced in OfxGrip 0.5.0. */
+	const ImageDesc& desc() const noexcept { return isGpu() ? gpu.desc : cpu.desc; }
+};
+
+/*! The colourspace conversion around a dispatch. Introduced in OfxGrip 0.5.0.
+
+    - `toKernel` → applied to every connected RGB or RGBA source before the kernel reads it.
+    - `toHost` → applied to the kernel's result before it reaches the destination.
+
+    An alpha-only source is not a color image and binds unconverted. */
+struct KernelColorPass {
+	ColorConversion toKernel;
+	ColorConversion toHost;
+	bool active() const noexcept { return !toKernel.isIdentity() || !toHost.isIdentity(); }
 };
 
 /*! One dispatch. The pointers stay valid for the call. */
@@ -61,6 +85,7 @@ struct KernelDispatch {
 	std::map<ParameterId, KernelImage> keyedImages; /*!< The images of keyed textures, by parameter. */
 	ThreadingService* threading{nullptr};        /*!< For the CPU backend; null runs single-threaded. */
 	std::function<bool()> abort;                 /*!< Polled between bands on the CPU backend. */
+	KernelColorPass color;                       /*!< The conversion around the kernel. Introduced in OfxGrip 0.5.0. */
 };
 
 /*! A backend. */
@@ -79,8 +104,14 @@ public:
 		static_cast<void>(implementation);
 		return true;
 	}
-	/*! Runs a dispatch. A GPU backend encodes on the host's queue and returns without waiting. */
+	/*! Runs a dispatch. A GPU backend encodes on the host's queue and returns without waiting.
+	    A backend ignores the dispatch's `color`: the engine applies it. */
 	virtual Error dispatch(const KernelDispatch& dispatch) = 0;
+	/*! Makes a 32-bit float RGBA image over `bounds` that this backend reads and writes, on the
+	    device and queue of `like`. The engine uses it for the intermediates of a colourspace
+	    conversion. The default makes none and fails with `Unsupported`.
+	    Introduced in OfxGrip 0.5.0. */
+	virtual Error makeScratch(const KernelImage& like, const RectI& bounds, KernelImage& out);
 	/*! Drops what the backend holds on a device or a driver: compiled programs, modules, a
 	    device of its own. A later dispatch builds them again. Called when no dispatch is in
 	    flight. The default holds nothing.
@@ -110,11 +141,17 @@ public:
 	/*! Runs a dispatch on the destination's backend, or on the dispatch's accelerator when the
 	    destination is a CPU view. Fails with `MissingHostFeature` when no backend serves that
 	    API, and `InvalidParameter` when the dispatch lacks a layout, an implementation, or a
-	    plan. */
+	    plan. A dispatch with an active `color` fails with `Unsupported` where
+	    `convertsColorOn` is false. */
 	Error run(const KernelDispatch& dispatch);
+	/*! Whether a colourspace conversion runs on frames of an API on this machine: the backend
+	    is available, the conversion kernel has a build for it, and the backend accepts that
+	    build. `None` is the CPU path. Introduced in OfxGrip 0.5.0. */
+	bool convertsColorOn(GpuApi api) const noexcept;
 
 private:
 	KernelEngine();
+	Error runConverted(KernelBackend& target, const KernelDispatch& dispatch);
 	std::map<GpuApi, std::unique_ptr<KernelBackend>> backends_;
 };
 

@@ -13,6 +13,7 @@
 */
 #pragma once
 
+#include <ofxgrip/core/ColorGamut.hpp>
 #include <ofxgrip/core/Error.hpp>
 #include <ofxgrip/core/Types.hpp>
 #include <ofxgrip/core/Value.hpp>
@@ -39,7 +40,11 @@ struct RenderInfo {
 	Point2D projectSize{0, 0};
 	Point2D projectOffset{0, 0};
 	double pixelAspect{1.0};
-	std::string colourspace;           /*!< The output colourspace name, when the host reports one. */
+	/*! The OpenFX native name of the colourspace the frames are in. Set for an effect whose
+	    manifest declares `colorManagement`: the Color Space parameter's choice, or the host's
+	    name for the output clip when the parameter is `Automatic`. Empty when neither names
+	    one. */
+	std::string colourspace;
 	std::string resolvePage;           /*!< `Edit`, `Color`, or `Fusion` on Resolve; else empty. */
 	bool operator==(const RenderInfo&) const = default;
 };
@@ -71,6 +76,10 @@ public:
 	const std::map<ParameterId, Value>& values() const noexcept { return values_; }
 
 	const RenderInfo& info() const noexcept { return info_; }
+	/*! The gamut and transfer of the frames: `colorSpaceNamed` of the info's colourspace.
+	    Nothing when the name is empty or names a space `ColorGamut` does not implement.
+	    Introduced in OfxGrip 0.5.0. */
+	std::optional<ColorSpace> colorSpace() const noexcept { return colorSpaceNamed(info_.colourspace); }
 	LicenseState license() const noexcept { return license_; }
 	/*! An extension's blob by key, or null. */
 	const Bytes* extra(std::string_view key) const noexcept;

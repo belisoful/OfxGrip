@@ -123,9 +123,10 @@ native window that hosts the real view on macOS.
 | `FxGripRect`, tile geometry | `RectI`, `RectD`, `KernelTile` | Parity | — |
 | `FxGripMTLDeviceCache` | `MetalBackend` pipeline cache and scratch pool | Parity | — |
 | Kernel path (`FxGripKernelEffect`, `FxGripKernelPipeline`, `FxGripKernelLayout`) | `KernelEffect`, `KernelEngine`, `KernelLayout`, `KernelCatalog` | Parity | OfxGrip adds the CPU, OpenCL, Vulkan, and CUDA backends. |
-| `FxGripShaderMetadata` | `KernelMetadata` | Partial | The `colorSpace` block is read. The kernel path does not apply it: no conversion runs around a kernel. |
+| `FxGripShaderMetadata` | `KernelMetadata` | Parity | The `colorSpace` block also accepts every `ColorGamut` transfer and gamut name. |
+| Primaries conversion (`FxGripShaderConverter`) | `KernelColorPass`, `KernelColor`, `GripColorConvert.slang` on the CPU, Metal, and CUDA backends | Parity | The CUDA build needs its PTX from the NVIDIA toolchain. |
 | Fragment shader path (`FxGripShaderEffect`, `FxGripShaderPipeline`, 2,151 lines) | None | Missing | Waits for FxGrip (decision 5). |
-| `FxGripColorGamut`, the `ColorGamut` category | `ColorGamut`: five gamuts, nine transfer functions, conversion matrices with Bradford adaptation, and the OpenFX colourspace names. `RenderSnapshot::colourspace` carries the host's name | Partial | No effect accessor resolves the snapshot's name to a gamut. No linear or gamma color parameters. |
+| `FxGripColorGamut`, the `ColorGamut` category | `ColorGamut`: five gamuts, nine transfer functions, conversion matrices with Bradford adaptation, and the OpenFX colourspace names. `capabilities.colorManagement` fills `RenderInfo::colourspace` from the host or the Color Space menu, and `RenderSnapshot::colorSpace` resolves it | Partial | No linear or gamma color parameters. |
 | `FxGripImageBuffer`, `FxGripImageCompression` (1,350 lines) | `ImageView`, `GpuImage` | Missing | The compressed in-memory pixel container. |
 | `FxGripWatermark` | `Watermark` on CPU, Metal, OpenCL, and CUDA frames | Parity | — |
 | `FxGripTextImage` | A 5×7 glyph font inside the watermark | Partial, Companion | Real font text needs CoreText on macOS. |
@@ -240,9 +241,12 @@ the third as the Resolve scripting bridge. The channel is the handoff D-007 alre
   Fusion pages on 2026-11-26: HostDump and Spot render on Metal through Resolve's queue, Spot
   shows its trial watermark, an Inspector edit re-renders, and the overlay draws on the Fusion
   page. The run found Q-RESOLVE-039 (a hang, fixed) and that Resolve states the page on the
-  instance. Open: a node-level effect on the Color page, the Presets control, the analysis pass,
-  label strings, an overlay drag, and a licensed render.
-- Tests: OfxGrip has 382. FxGrip has about 3,800.
+  instance. The same day the 0.5.0 Spot converted around its kernel on the Fusion page with
+  its Color Space menu set to Rec. 709, on Metal through Resolve's queue. Resolve names an
+  Edit-page clip `Raw` in both colour science modes (Q-RESOLVE-028). Open: a node-level effect
+  on the Color page, the Presets control, the analysis pass, label strings, an overlay drag,
+  a licensed render, and preferred colourspaces in clip preferences.
+- Tests: OfxGrip has 400. FxGrip has about 3,800.
 - Documentation: OfxGrip has four documents. FxGrip has 63 DocC articles.
 
 ## 9. Order
@@ -250,7 +254,7 @@ the third as the Resolve scripting bridge. The channel is the handoff D-007 alre
 1. Run the live Resolve probes on the Mac for what exists. Done for the Edit and Fusion pages;
    section 8 lists what is open.
 2. Port the host-neutral C++ parts. Done: color gamut math, timecode, curve data, path data,
-   dictionary values with interpolation, the URL whitelist. Open: kernel color conversion, the
+   dictionary values with interpolation, the URL whitelist, kernel color conversion. Open: the
    timing fields of `TimeService`, temporal access, the image buffer, the missing overlay parts,
    keyframed capture, the instance channel, the custom-parameter interpolation action.
 3. Give each omitted parameter type an OpenFX form.

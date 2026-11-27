@@ -19,6 +19,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 
 OFXGRIP_NAMESPACE_BEGIN
@@ -124,5 +125,33 @@ struct ColorSpace {
     table does not hold: a camera log space, a generic space such as `ofx_scene_linear`, a
     role, or raw data. */
 std::optional<ColorSpace> colorSpaceNamed(std::string_view ofxName) noexcept;
+
+/*! One entry of the colourspace menu: an OpenFX native colourspace name and a display label. */
+struct ColorSpaceChoice {
+	std::string_view ofxName;
+	std::string_view label;
+};
+
+/*! The colourspaces an effect offers on a host that names none (Q-RESOLVE-028). The order is
+    fixed, because a host persists a choice by its index (Q-OFX-ANY-007). A later release appends.
+    `colorSpaceNamed` resolves every name. */
+std::span<const ColorSpaceChoice> colorSpaceChoices() noexcept;
+
+/*! A conversion of one color from a colourspace into another: decode to linear light, convert
+    the gamut, encode. The decode and the encode apply to unpremultiplied components. */
+struct ColorConversion {
+	ColorTransfer decode{ColorTransfer::Linear};
+	ColorMatrix matrix;
+	ColorTransfer encode{ColorTransfer::Linear};
+
+	/*! Whether the conversion changes no color. */
+	bool isIdentity() const noexcept;
+	/*! The conversion applied to one unpremultiplied color. */
+	ColorVector apply(const ColorVector& rgb) const noexcept;
+	bool operator==(const ColorConversion&) const noexcept = default;
+};
+
+/*! The conversion from one colourspace into another. Equal spaces give the identity. */
+ColorConversion colorConversion(const ColorSpace& from, const ColorSpace& to) noexcept;
 
 OFXGRIP_NAMESPACE_END

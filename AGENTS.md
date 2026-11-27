@@ -122,12 +122,15 @@ paraphrase their code. The official OpenFX headers are a separate case.
 - `include/ofxgrip/gpu/` — the GPU backends: `MetalBackend` and `MetalKernelBackend` (macOS),
   `OpenCLBackend`, `VulkanBackend` and `VulkanKernelBackend` (OfxGrip's own device, an
   accelerator for CPU frames), `CudaDriver` and `CudaKernelBackend` (the driver API, resolved at
-  run time), the kernel engine (`KernelEngine`, `CpuKernelBackend`, `KernelCpu`), and the
+  run time), the kernel engine (`KernelEngine`, `CpuKernelBackend`, `KernelCpu`), the
+  colourspace conversion around a kernel (`KernelColor`), and the
   watermarks (`MetalWatermark`, `OpenCLWatermark`, `CudaWatermark`). Opaque handles only; no
   Metal, OpenCL, Vulkan, or CUDA header is included from a public header.
 - `include/ofxgrip/inference/` — `InferKitBackend`, the inference backend over InferKit's C
   interface.
-- `kernels/` — `GripKernel.slang`, OfxGrip's copy of the D-009 kernel module.
+- `kernels/` — `GripKernel.slang`, OfxGrip's copy of the D-009 kernel module, and
+  `GripColorConvert.slang`, the colourspace conversion the kernels library embeds with its
+  generated outputs.
 - `external/slang-prelude/` — the Slang C++ prelude the CPU backend compiles emitted kernels
   against, and the Slang CUDA prelude `nvcc` compiles a kernel's PTX against (Apache-2.0 with
   LLVM exception).

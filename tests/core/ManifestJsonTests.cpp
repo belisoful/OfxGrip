@@ -14,7 +14,7 @@ const char* kSample = R"({
   "effect": {
     "ofxId": "com.example.glow", "uuid": "123", "name": "Glow", "grouping": "Stylize", "kind": "filter",
     "version": "2.3.1", "deprecatedMajors": [1],
-    "capabilities": { "tiles": true, "depths": ["8u", "32f"], "gpu": ["metal"], "threadSafety": "full", "noSpatialAwareness": true }
+    "capabilities": { "tiles": true, "depths": ["8u", "32f"], "gpu": ["metal"], "threadSafety": "full", "noSpatialAwareness": true, "colorManagement": true }
   },
   "clips": [ { "name": "Mask", "optional": true, "mask": true } ],
   "parameters": [
@@ -40,6 +40,8 @@ TEST(ManifestJson, ParsesTheSample)
 	EXPECT_EQ(m.deprecatedMajors, std::vector<unsigned>{1});
 	EXPECT_TRUE(m.capabilities.metalRender);
 	EXPECT_TRUE(m.capabilities.noSpatialAwareness);
+	EXPECT_TRUE(m.capabilities.colorManagement);
+	EXPECT_FALSE(EffectManifest{}.capabilities.colorManagement);
 	ASSERT_EQ(m.capabilities.depths.size(), 2u);
 	EXPECT_EQ(m.capabilities.depths[1], BitDepth::Float);
 	ASSERT_EQ(m.clips.size(), 1u);

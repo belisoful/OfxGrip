@@ -139,7 +139,7 @@ OfxGrip/
     ofx/           the OpenFX adapter: Suites, PropertySet, Actions, Descriptor, Effect,
                    KernelEffect, InferenceEffect, Interact, GlFunctions, RenderWatermark, Analysis, Plugin, OfxHostServices,
                    ResolveExtensions
-    gpu/           KernelEngine, CpuKernelBackend, KernelCpu; MetalBackend, MetalKernelBackend,
+    gpu/           KernelEngine, CpuKernelBackend, KernelCpu, KernelColor; MetalBackend, MetalKernelBackend,
                    MetalWatermark (macOS); OpenCLBackend, OpenCLWatermark; VulkanBackend,
                    VulkanKernelBackend; CudaDriver, CudaKernelBackend, CudaWatermark
     inference/     InferKitBackend, the adapter over InferKit's C interface
@@ -163,7 +163,7 @@ OfxGrip/
 - **Manifest**: `EffectManifest { identity (ofxId, uuid, name, grouping, kind), version {major, minor}, deprecatedMajors, capabilities (tiles, multiResolution, renderScale, depths, gpu, cpuFallback, threadSafety, temporalAccess), clips, parameters, migrations }`. `ParameterSpec { id, key, type, label, hint, parent, defaults, range, displayRange, hostFlags, appFlags, options[{key,label}], tags, meta, visibleWhen, enabledWhen, hosts }`. Validation checks ID and key uniqueness, the reserved range 9991 to 9999, option-key stability, and host limits.
 - **Events**: lifecycle `Load, Describe, DescribeInContext, CreateInstance, AddedToDocument, Properties, AddParameters, FinishSetup, BeginInstanceChanged, InstanceChanged, EndInstanceChanged, ParameterClicked, Flush, SyncPrivateData, BuildSnapshot, RegionOfDefinition, RegionsOfInterest, FramesNeeded, ClipPreferences, IsIdentity, BeginSequenceRender, Render, EndSequenceRender, PurgeCaches, DestroyInstance, Unload`; API traffic `ParameterAddPre, ParameterAdd, GetValue, SetValuePre, SetValue, GetLabel, SetLabelPre, SetLabel, GetFlags, SetFlagsPre, SetFlags, SetOptionsPre, SetOptions`. Payloads are mutable structs; an observer sets `error` to veto or `result` to override.
 - **HostServices**: `Identity`, `HostProfile`, `ParameterService` (typed get and set at time, flags, label, options, keyframes, `canWrite(phase)`), `EditScope`, `TimeService`, `ImageService`, `PersistenceService` (keyed blobs), `FeedbackService` (message, persistent message, progress, abort), `ThreadingService`, `LogService`. Each service carries a phase-validity table checked in debug builds.
-- **RenderSnapshot**: immutable; `values` by parameter ID, `time`, `frameRate`, `renderScale`, `field`, `draft`, `projectSize`, `pixelAspect`, `colour`, `license`. Codec: a versioned little-endian tag-length-value stream, the same bytes on every platform.
+- **RenderSnapshot**: immutable; `values` by parameter ID, `time`, `frameRate`, `renderScale`, `field`, `draft`, `projectSize`, `pixelAspect`, `colourspace` (for a colour-managed effect), `license`. Codec: a versioned little-endian tag-length-value stream, the same bytes on every platform.
 - **Quirks**: `enum class Quirk` with one case per registry key; `HostProfile::has(Quirk)` resolves name prefix and version range from a compiled table, then probed capabilities override.
 
 ## 6. Full Check

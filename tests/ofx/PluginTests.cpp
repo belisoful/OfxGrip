@@ -1174,6 +1174,17 @@ TEST(KernelEffectFactory, DeclaresAGpuPathOnlyWhereItRuns)
 		factory.onLoad(profile, log);
 		EXPECT_EQ(factory.manifest().capabilities.cudaRender, each.declared);
 	}
+	// A colour-managed effect converts around its kernels, so the path also needs the
+	// conversion kernel's build, which exists for CUDA once its PTX is checked in.
+	base.capabilities.colorManagement = true;
+	KernelEffectFactoryFor<KernelEffect> managed(base, {record});
+	ASSERT_TRUE(managed.manifest().capabilities.colorManagement);
+	KernelEngine::shared().registerBackend(std::make_unique<StandInBackend>(true, true));
+	const bool converts = KernelEngine::shared().convertsColorOn(GpuApi::Cuda);
+	LineLog managedLog;
+	managed.onLoad(profile, managedLog);
+	EXPECT_EQ(managed.manifest().capabilities.cudaRender, converts);
+	EXPECT_EQ(managedLog.contains("No colourspace conversion runs on cuda on this machine, so the effect declares no cuda render"), !converts);
 	KernelEngine::shared().registerBackend(std::make_unique<StandInBackend>(false, false));
 }
 
@@ -1210,4 +1221,135 @@ TEST(KernelEffectFactory, TheHostSeesTheWithdrawnPathAtDescribe)
 		PluginRegistry::instance().clear();
 	}
 	KernelEngine::shared().registerBackend(std::make_unique<StandInBackend>(false, false));
+}
+
+namespace {
+
+struct ColorTrace {
+	std::string colourspace;
+	std::optional<ColorSpace> space;
+	bool hasChoice{false};
+};
+
+ColorTrace& colorTrace()
+{
+	static ColorTrace t;
+	return t;
+}
+
+class ColorEffect final : public Effect {
+public:
+	Error render(RenderContext& context) override
+	{
+		colorTrace().colourspace = context.snapshot.info().colourspace;
+		colorTrace().space = context.snapshot.colorSpace();
+		colorTrace().hasChoice = context.snapshot.has(kParameterIdColorSpace);
+		context.output.clear();
+		return Error::none();
+	}
+};
+
+/*! One plug-in on one host, rendered once per call. */
+struct ColorRun {
+	std::unique_ptr<MiniHost> host;
+	std::unique_ptr<Instance> instance;
+
+	ColorRun(bool managedEffect, const HostOptions& options)
+	{
+		EffectManifest m = testManifest();
+		m.identity.ofxId = "com.belisoful.ofxgrip.test.color";
+		m.identity.uuid = "55555555-5555-4555-8555-555555555555";
+		m.capabilities.colorManagement = managedEffect;
+		const int index = PluginRegistry::instance().registerFactory(std::make_unique<EffectFactoryFor<ColorEffect>>(m));
+		EXPECT_GE(index, 0);
+		host = std::make_unique<MiniHost>(options);
+		EXPECT_EQ(host->load(PluginRegistry::instance().plugin(index), "/tmp/test.ofx.bundle"), kOfxStatOK);
+		EXPECT_EQ(host->describe(), kOfxStatOK);
+		instance = host->createInstance(kOfxImageEffectContextFilter, Project{});
+		if (instance) {
+			instance->setInput("Source", makeRampImage(64, 64, BitDepth::Float));
+		}
+	}
+	~ColorRun()
+	{
+		instance.reset();
+		host->unload();
+		PluginRegistry::instance().clear();
+	}
+	const ColorTrace& render()
+	{
+		colorTrace() = ColorTrace{};
+		EXPECT_TRUE(instance->render(RenderRequest{}).ok());
+		return colorTrace();
+	}
+};
+
+HostOptions colourManagedHost()
+{
+	HostOptions options = HostOptions::spec();
+	options.colourManagementStyle = "OfxImageEffectColourManagementCore";
+	options.colourspace = "ACEScg";
+	return options;
+}
+
+}  // namespace
+
+TEST(ColorManagement, AManagedEffectReadsTheHostsColourspace)
+{
+	ColorRun run(true, colourManagedHost());
+	ASSERT_NE(run.instance, nullptr);
+	// The plug-in declares the full style and the config it reads names from.
+	EXPECT_EQ(run.host->descriptorProps()->getString("OfxImageEffectPropColourManagementStyle"), "OfxImageEffectColourManagementFull");
+	EXPECT_EQ(run.host->descriptorProps()->getString("OfxImageEffectPropColourManagementAvailableConfigs"), "ofx-native-v1.5_aces-v1.3_ocio-v2.3");
+	ASSERT_NE(run.instance->param(kColorSpaceParameterKey), nullptr);
+
+	EXPECT_EQ(run.render().colourspace, "ACEScg");
+	EXPECT_EQ(colorTrace().space, (ColorSpace{ColorPrimaries::AcesAp1, ColorTransfer::Linear}));
+	EXPECT_TRUE(colorTrace().hasChoice);
+
+	// A name ColorGamut does not implement is carried and resolves to nothing.
+	run.instance->setColourspace("arri_logc4");
+	EXPECT_EQ(run.render().colourspace, "arri_logc4");
+	EXPECT_FALSE(colorTrace().space.has_value());
+
+	// An output that refers to the source clip takes the source's name.
+	run.instance->setColourspace("rec1886_rec709_display");
+	run.instance->clipProps("Output")->setString("OfxImageClipPropColourspace", "OfxColourspace_Source");
+	EXPECT_EQ(run.render().colourspace, "rec1886_rec709_display");
+	// An output that states none falls back to the first input that does.
+	run.instance->clipProps("Output")->setString("OfxImageClipPropColourspace", "");
+	EXPECT_EQ(run.render().colourspace, "rec1886_rec709_display");
+
+	// A choice other than Automatic names the colourspace itself.
+	run.instance->setParam(kColorSpaceParameterKey, {1});
+	EXPECT_EQ(run.render().colourspace, "srgb_display");
+	EXPECT_EQ(colorTrace().space, (ColorSpace{ColorPrimaries::Rec709, ColorTransfer::Srgb}));
+	run.instance->setParam(kColorSpaceParameterKey, {static_cast<double>(colorSpaceChoices().size())});
+	EXPECT_EQ(run.render().colourspace, "ACES2065-1");
+	run.instance->setParam(kColorSpaceParameterKey, {0});
+	EXPECT_EQ(run.render().colourspace, "rec1886_rec709_display");
+}
+
+TEST(ColorManagement, AHostThatNamesNoColourspaceLeavesTheChoice)
+{
+	// Q-RESOLVE-028: the host offers no colour management.
+	ColorRun run(true, HostOptions::spec());
+	ASSERT_NE(run.instance, nullptr);
+	EXPECT_FALSE(run.host->descriptorProps()->has("OfxImageEffectPropColourManagementStyle"));
+	run.instance->setColourspace("ACEScg");
+	EXPECT_EQ(run.render().colourspace, "");
+	EXPECT_FALSE(colorTrace().space.has_value());
+	run.instance->setParam(kColorSpaceParameterKey, {2});
+	EXPECT_EQ(run.render().colourspace, "rec1886_rec709_display");
+	EXPECT_EQ(colorTrace().space, (ColorSpace{ColorPrimaries::Rec709, ColorTransfer::Gamma24}));
+}
+
+TEST(ColorManagement, AnEffectThatDeclaresNoneReadsNoColourspace)
+{
+	ColorRun run(false, colourManagedHost());
+	ASSERT_NE(run.instance, nullptr);
+	EXPECT_FALSE(run.host->descriptorProps()->has("OfxImageEffectPropColourManagementStyle"));
+	EXPECT_EQ(run.instance->param(kColorSpaceParameterKey), nullptr);
+	EXPECT_EQ(run.render().colourspace, "");
+	EXPECT_FALSE(colorTrace().hasChoice);
 }

@@ -190,6 +190,24 @@ static_assert(sizeof(VaryingInput) == sizeof(ComputeVaryingInput), "The varying 
 
 }  // namespace
 
+Error CpuKernelBackend::makeScratch(const KernelImage& like, const RectI& bounds, KernelImage& out)
+{
+	if (bounds.empty()) {
+		return Error::make(ErrorCode::InvalidParameter, "A scratch image needs bounds");
+	}
+	ImageDesc desc = like.desc();
+	desc.bounds = bounds;
+	desc.regionOfDefinition = bounds;
+	desc.depth = BitDepth::Float;
+	desc.components = Components::RGBA;
+	auto buffer = std::make_shared<ImageBuffer>(desc);
+	out = KernelImage{};
+	out.connected = true;
+	out.cpu = buffer->view();
+	out.owner = std::move(buffer);
+	return Error::none();
+}
+
 Error CpuKernelBackend::dispatch(const KernelDispatch& d)
 {
 	const KernelLayout& layout = *d.layout;

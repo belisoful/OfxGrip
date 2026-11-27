@@ -3,6 +3,7 @@
 // The Spot bundle: a kernel effect whose parameters come from its Slang metadata block, rendered
 // on the CPU on every platform, on Metal on macOS, and on the Vulkan accelerator where a device
 // opens, with the same pixels.
+#include <ofxgrip/core/ColorGamut.hpp>
 #include <ofxgrip/minihost/BundleLoader.hpp>
 #include <ofxgrip/minihost/MiniHost.hpp>
 
@@ -12,6 +13,7 @@
 
 #if defined(OFXGRIP_HAS_CUDA)
 #include <ofxgrip/gpu/CudaDriver.hpp>
+#include <ofxgrip/gpu/KernelColor.hpp>
 #endif
 #if defined(OFXGRIP_HAS_VULKAN)
 #include <ofxgrip/gpu/VulkanBackend.hpp>
@@ -123,12 +125,13 @@ TEST_F(SpotBundle, DescribesTheKernelsParametersAndPaths)
 #if defined(OFXGRIP_HAS_METAL)
 	EXPECT_EQ(props->getString(kOfxImageEffectPropMetalRenderSupported), "true");
 #endif
+	// Spot is colour-managed, so its CUDA path also needs the conversion kernel's PTX.
 	// Spot's PTX comes from the CUDA 12.8 toolkit: the effect declares CUDA where a driver of
 	// that release or a newer one is installed.
 	bool cudaRuns = false;
 #if defined(OFXGRIP_HAS_CUDA)
 	if (const cuda::CudaDriver* driver = cuda::CudaDriver::system()) {
-		cudaRuns = driver->version() == 0 || driver->version() >= 12080;
+		cudaRuns = kernelColorBuild(GpuApi::Cuda) != nullptr && (driver->version() == 0 || driver->version() >= 12080);
 	}
 #endif
 	EXPECT_EQ(props->getString(kOfxImageEffectPropCudaRenderSupported), cudaRuns ? "true" : "false");
@@ -222,7 +225,120 @@ TEST_F(SpotBundle, RendersTheSpotlightOnTheCpu)
 	EXPECT_EQ(at(none.image, 8, 8, 3), 0.0f);
 }
 
+// Spot's kernel computes in linear light. With a named colourspace the engine decodes the frame,
+// runs the kernel, and encodes the result, so the outside gain scales light and not code values.
+TEST_F(SpotBundle, ANamedColourspaceConvertsAroundTheKernel)
+{
+	HostOptions options = HostOptions::spec();
+	options.colourManagementStyle = "OfxImageEffectColourManagementFull";
+	options.colourspace = "srgb_display";
+	start(options);
+	EXPECT_EQ(host_->descriptorProps()->getString("OfxImageEffectPropColourManagementStyle"), "OfxImageEffectColourManagementFull");
+	ASSERT_NE(instance_->param("ofxgrip_colorspace"), nullptr);
+	std::shared_ptr<ImageBuffer> source = makeRampImage(32, 16, BitDepth::Float);
+	instance_->setInput("Source", source);
+	instance_->setParam("center", {8.0, 8.0});
+	instance_->setParam("radius", {4.0});
+	instance_->setParam("softness", {0.0});
+	instance_->setParam("outsideGain", {0.25});
+	const auto outside = [&](ColorTransfer transfer, std::size_t c) {
+		const double linear = toLinear(transfer, at(*source, 30, 8, c));
+		return static_cast<float>(fromLinear(transfer, linear * 0.25));
+	};
+	for (int tileSize : {0, 7}) {
+		RenderRequest request;
+		request.tileSize = tileSize;
+		request.threads = tileSize == 0 ? 1 : 3;
+		RenderResult srgb = instance_->render(request);
+		ASSERT_TRUE(srgb.ok());
+		for (std::size_t c = 0; c < 3; ++c) {
+			EXPECT_NEAR(at(srgb.image, 8, 8, c), at(*source, 8, 8, c), 1e-4f) << "inside, channel " << c;
+			EXPECT_NEAR(at(srgb.image, 30, 8, c), outside(ColorTransfer::Srgb, c), 1e-4f) << "outside, channel " << c;
+		}
+		EXPECT_EQ(at(srgb.image, 30, 8, 3), at(*source, 30, 8, 3));
+	}
+	// The host's name changes the result: a linear frame needs no conversion.
+	instance_->setColourspace("lin_rec709_srgb");
+	RenderResult linear = instance_->render(RenderRequest{});
+	ASSERT_TRUE(linear.ok());
+	EXPECT_NEAR(at(linear.image, 30, 8, 0), at(*source, 30, 8, 0) * 0.25f, 1e-6f);
+	// The Color Space parameter overrides the host: Rec. 709 is a 2.4 power curve.
+	instance_->setParam("ofxgrip_colorspace", {2.0});
+	RenderResult chosen = instance_->render(RenderRequest{});
+	ASSERT_TRUE(chosen.ok());
+	EXPECT_NEAR(at(chosen.image, 30, 8, 0), outside(ColorTransfer::Gamma24, 0), 1e-4f);
+	// An 8-bit frame converts through float intermediates.
+	instance_->setParam("ofxgrip_colorspace", {0.0});
+	instance_->setColourspace("srgb_display");
+	instance_->setInput("Source", makeRampImage(32, 16, BitDepth::UInt8));
+	RenderRequest bytes;
+	bytes.depth = BitDepth::UInt8;
+	RenderResult eight = instance_->render(bytes);
+	ASSERT_TRUE(eight.ok());
+	EXPECT_NEAR(at(eight.image, 30, 8, 0), outside(ColorTransfer::Srgb, 0), 2.5f / 255.0f);
+	EXPECT_NEAR(at(eight.image, 8, 8, 0), at(*source, 8, 8, 0), 1.5f / 255.0f);
+}
+
+// A host that names no colourspace renders as before until the user picks one (Q-RESOLVE-028).
+TEST_F(SpotBundle, WithoutAColourspaceTheKernelReadsTheFrameAsItIs)
+{
+	start();
+	EXPECT_FALSE(host_->descriptorProps()->has("OfxImageEffectPropColourManagementStyle"));
+	std::shared_ptr<ImageBuffer> source = makeRampImage(32, 16, BitDepth::Float);
+	instance_->setInput("Source", source);
+	instance_->setParam("center", {8.0, 8.0});
+	instance_->setParam("radius", {4.0});
+	instance_->setParam("softness", {0.0});
+	instance_->setParam("outsideGain", {0.25});
+	RenderResult plain = instance_->render(RenderRequest{});
+	ASSERT_TRUE(plain.ok());
+	EXPECT_NEAR(at(plain.image, 30, 8, 0), at(*source, 30, 8, 0) * 0.25f, 1e-6f);
+	instance_->setParam("ofxgrip_colorspace", {1.0});
+	RenderResult srgb = instance_->render(RenderRequest{});
+	ASSERT_TRUE(srgb.ok());
+	const double linear = toLinear(ColorTransfer::Srgb, at(*source, 30, 8, 0));
+	EXPECT_NEAR(at(srgb.image, 30, 8, 0), fromLinear(ColorTransfer::Srgb, linear * 0.25), 1e-4);
+}
+
 #if defined(OFXGRIP_HAS_METAL)
+
+TEST_F(SpotBundle, MetalRenderWithAColourspaceMatchesTheCpuRender)
+{
+	if (!metal::MetalContext::available()) {
+		GTEST_SKIP() << "No Metal device";
+	}
+	HostOptions options = HostOptions::spec();
+	options.metalRenderSupported = true;
+	options.colourManagementStyle = "OfxImageEffectColourManagementFull";
+	options.colourspace = "rec1886_rec2020_display";
+	start(options);
+	instance_->setParam("center", {10.0, 6.0});
+	instance_->setParam("radius", {5.0});
+	instance_->setParam("softness", {6.0});
+	instance_->setParam("outsideGain", {0.3});
+	instance_->setParam("tint", {1.0, 0.5, 0.25});
+	for (BitDepth depth : {BitDepth::Float, BitDepth::Half, BitDepth::UInt16}) {
+		for (int tileSize : {0, 7}) {
+			instance_->setInput("Source", makeRampImage(32, 16, depth));
+			RenderRequest cpu;
+			cpu.depth = depth;
+			cpu.tileSize = tileSize;
+			RenderResult a = instance_->render(cpu);
+			RenderRequest gpu = cpu;
+			gpu.gpu = GpuApi::Metal;
+			RenderResult b = instance_->render(gpu);
+			ASSERT_TRUE(a.ok() && b.ok()) << toString(depth);
+			ASSERT_EQ(b.gpu, GpuApi::Metal);
+			for (int y = 0; y < 16; ++y) {
+				for (int x = 0; x < 32; ++x) {
+					for (std::size_t c = 0; c < 4; ++c) {
+						ASSERT_NEAR(at(a.image, x, y, c), at(b.image, x, y, c), 0.02f) << toString(depth) << " at " << x << "," << y << " channel " << c;
+					}
+				}
+			}
+		}
+	}
+}
 
 TEST_F(SpotBundle, MetalRenderMatchesTheCpuRender)
 {

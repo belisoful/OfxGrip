@@ -11,6 +11,14 @@
 	host the GPU paths on which every kernel resolves, and parses each build's reflection layout
 	once. A render packs the snapshot's values, binds the clips, and dispatches the primary
 	kernel on the frame's backend through `KernelEngine`.
+
+	Color. A kernel's metadata names the colourspace it computes in (`KernelColorSpace`). When
+	the render snapshot names the colourspace of the frames, the dispatch carries the
+	conversion into the kernel's space and back, and the engine runs it around the kernel. The
+	snapshot names one only for an effect whose manifest declares `colorManagement`. Such an
+	effect declares a GPU path only where the conversion kernel also runs. An effect that chains
+	kernels clears `dispatch.color` in `onPrepareDispatch` for a pass that reads another pass's
+	result.
 */
 #pragma once
 

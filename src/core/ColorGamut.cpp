@@ -114,6 +114,21 @@ constexpr SpaceName kSpaceNames[] = {
     {"ACEScg", {ColorPrimaries::AcesAp1, ColorTransfer::Linear}},
 };
 
+// Append only: a host persists the choice by its index (Q-OFX-ANY-007).
+constexpr ColorSpaceChoice kSpaceChoices[] = {
+    {"srgb_display", "sRGB"},
+    {"rec1886_rec709_display", "Rec. 709"},
+    {"lin_rec709_srgb", "Rec. 709 Linear"},
+    {"rec1886_rec2020_display", "Rec. 2020"},
+    {"lin_rec2020", "Rec. 2020 Linear"},
+    {"rec2100_pq_display", "Rec. 2100 PQ"},
+    {"rec2100_hlg_display", "Rec. 2100 HLG"},
+    {"displayp3_display", "Display P3"},
+    {"lin_p3d65", "P3-D65 Linear"},
+    {"ACEScg", "ACEScg"},
+    {"ACES2065-1", "ACES2065-1"},
+};
+
 }  // namespace
 
 ColorMatrix ColorMatrix::operator*(const ColorMatrix& right) const noexcept
@@ -309,6 +324,37 @@ std::optional<ColorSpace> colorSpaceNamed(std::string_view ofxName) noexcept
 		}
 	}
 	return std::nullopt;
+}
+
+std::span<const ColorSpaceChoice> colorSpaceChoices() noexcept
+{
+	return kSpaceChoices;
+}
+
+bool ColorConversion::isIdentity() const noexcept
+{
+	return decode == encode && matrix == ColorMatrix::identity();
+}
+
+ColorVector ColorConversion::apply(const ColorVector& rgb) const noexcept
+{
+	if (isIdentity()) {
+		return rgb;
+	}
+	const ColorVector linear = matrix.apply({toLinear(decode, rgb[0]), toLinear(decode, rgb[1]), toLinear(decode, rgb[2])});
+	return {fromLinear(encode, linear[0]), fromLinear(encode, linear[1]), fromLinear(encode, linear[2])};
+}
+
+ColorConversion colorConversion(const ColorSpace& from, const ColorSpace& to) noexcept
+{
+	ColorConversion conversion;
+	if (from == to) {
+		return conversion;
+	}
+	conversion.decode = from.transfer;
+	conversion.matrix = gamutConversionMatrix(from.primaries, to.primaries);
+	conversion.encode = to.transfer;
+	return conversion;
 }
 
 OFXGRIP_NAMESPACE_END

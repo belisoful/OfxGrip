@@ -13,6 +13,7 @@
 #include <ofxgrip/gpu/OpenCLBackend.hpp>
 #endif
 
+#include "ofxColour.h"
 #include "ofxGPURender.h"
 #include "ofxImageEffect.h"
 #include "ofxInteract.h"
@@ -432,6 +433,8 @@ private:
 		c.openCLRender = hostProps.getString(kOfxImageEffectPropOpenCLRenderSupported, std::string("false"), 0) == "true";
 		c.openGLRender = hostProps.getString(kOfxImageEffectPropOpenGLRenderSupported, std::string("false"), 0) == "true";
 		c.nativeOrigin = hostProps.getString(kOfxImageEffectHostPropNativeOrigin, std::string(), 0);
+		const std::string colourStyle = hostProps.getString(kOfxImageEffectPropColourManagementStyle, std::string(kOfxImageEffectColourManagementNone), 0);
+		c.colourManagement = !colourStyle.empty() && colourStyle != kOfxImageEffectColourManagementNone;
 		c.supportedContexts = hostProps.getStrings(kOfxImageEffectPropSupportedContexts);
 		c.supportedComponents = hostProps.getStrings(kOfxImageEffectPropSupportedComponents);
 		c.supportedPixelDepths = hostProps.getStrings(kOfxImageEffectPropSupportedPixelDepths);
@@ -611,6 +614,34 @@ private:
 		return statusOf(e ? e : flushed);
 	}
 
+	/*! The host's colourspace name for the output clip, or for the first input clip that
+	    states one. A name that refers to another clip (`OfxColourspace_<clip>`) resolves to
+	    that clip's name. */
+	std::string hostColourspace(OfxHostServices& services) const
+	{
+		static constexpr std::string_view kReference = "OfxColourspace_";
+		const auto named = [&services](const std::string& clip) {
+			if (services.clipHandle(clip) == nullptr) {
+				return std::string();
+			}
+			return services.clipProperties(clip).getString(kOfxImageClipPropColourspace, std::string(), 0);
+		};
+		std::string name = named(kOfxImageEffectOutputClipName);
+		if (name.rfind(kReference, 0) == 0) {
+			name = named(name.substr(kReference.size()));
+		}
+		if (!name.empty()) {
+			return name;
+		}
+		for (const ClipSpec& clip : manifest_.effectiveClips()) {
+			name = named(clip.name);
+			if (!name.empty() && name.rfind(kReference, 0) != 0) {
+				return name;
+			}
+		}
+		return std::string();
+	}
+
 	RenderInfo renderInfo(Effect& effect, Time time, Point2D renderScale, Field field, const RectI& window, bool draft, bool interactive, bool sequential)
 	{
 		OfxHostServices& services = effect.ofxServices();
@@ -627,6 +658,9 @@ private:
 		info.projectOffset = services.time().projectOffset();
 		info.pixelAspect = services.time().projectPixelAspect();
 		info.resolvePage = services.resolvePage();
+		if (manifest_.capabilities.colorManagement && profile_.capabilities.colourManagement) {
+			info.colourspace = hostColourspace(services);
+		}
 		return info;
 	}
 

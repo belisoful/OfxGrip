@@ -34,10 +34,13 @@ EffectManifest baseManifest()
 	m.identity.description = "A soft spotlight rendered by one Slang kernel on Metal and on the CPU. The OfxGrip kernel sample.";
 	m.identity.author = "Belisoful";
 	m.identity.kind = EffectKind::Filter;
-	m.version = Version{1, 0, 0};
+	m.version = Version{1, 1, 0};
 	m.capabilities.supportsTiles = true;
 	m.capabilities.supportsMultiResolution = true;
 	m.capabilities.depths = {BitDepth::UInt8, BitDepth::UInt16, BitDepth::Half, BitDepth::Float};
+	// The kernel computes in linear light. With a named colourspace the engine decodes the
+	// frames around it. Resolve names none (Q-RESOLVE-028), so the user picks one.
+	m.capabilities.colorManagement = true;
 	m.properties["overlay"] = Value(true);
 	// The sample ships as a 30-day trial through the built-in provider: Trial renders clean, an
 	// expired trial renders the unlicensed mark. A store's provider replaces `trial` by name.

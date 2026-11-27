@@ -94,10 +94,13 @@ endif()
 add_library(ofxgrip_kernels STATIC
   gpu/KernelEngine.cpp
   gpu/CpuKernelBackend.cpp
-  gpu/KernelCpu.cpp)
+  gpu/KernelCpu.cpp
+  gpu/KernelColor.cpp)
 add_library(OfxGrip::kernels ALIAS ofxgrip_kernels)
 target_link_libraries(ofxgrip_kernels PUBLIC OfxGrip::core)
 target_include_directories(ofxgrip_kernels SYSTEM PUBLIC "${PROJECT_SOURCE_DIR}/external/slang-prelude")
+# The colourspace conversion the engine runs around a kernel (gpu/KernelColor.cpp).
+ofxgrip_add_kernels(TARGET ofxgrip_kernels KERNELS "${PROJECT_SOURCE_DIR}/kernels/GripColorConvert.slang" ENTRY gripColorConvert)
 
 if(APPLE)
   target_sources(ofxgrip_gpu_metal PRIVATE gpu/MetalKernelBackend.cpp)

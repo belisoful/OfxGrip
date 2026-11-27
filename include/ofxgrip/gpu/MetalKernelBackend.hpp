@@ -26,6 +26,10 @@ public:
 	GpuApi api() const noexcept override { return GpuApi::Metal; }
 	bool available() const noexcept override;
 	Error dispatch(const KernelDispatch& dispatch) override;
+	/*! A pooled buffer on the queue of `like`. Its owner is a `metal::MetalBuffer`, which
+	    returns to the pool after the last command buffer that binds it completes.
+	    Introduced in OfxGrip 0.5.0. */
+	Error makeScratch(const KernelImage& like, const RectI& bounds, KernelImage& out) override;
 	/*! Registers the backend with `KernelEngine::shared()`. Idempotent. */
 	static void registerWithEngine();
 };

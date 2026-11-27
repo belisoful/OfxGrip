@@ -3,6 +3,7 @@
 #include <ofxgrip/ofx/Descriptor.hpp>
 
 #include <ofxgrip/core/About.hpp>
+#include <ofxgrip/core/ColorGamut.hpp>
 #include <ofxgrip/core/Debug.hpp>
 #include <ofxgrip/core/Licensing.hpp>
 #include <ofxgrip/core/Presets.hpp>
@@ -15,6 +16,8 @@
 #include <ofxgrip/gpu/OpenCLBackend.hpp>
 #endif
 
+#include "ofx-native-v1.5_aces-v1.3_ocio-v2.3.h"
+#include "ofxColour.h"
 #include "ofxImageEffect.h"
 #include "ofxParam.h"
 
@@ -296,6 +299,15 @@ std::string sanitizeLabel(const std::string& text, bool strict)
 std::vector<ParameterSpec> frameworkParameters(const EffectManifest& manifest, bool debugAllowed)
 {
 	std::vector<ParameterSpec> out;
+	if (manifest.capabilities.colorManagement) {
+		std::vector<ChoiceOption> options{{"automatic", "Automatic"}};
+		for (const ColorSpaceChoice& choice : colorSpaceChoices()) {
+			options.push_back({std::string(choice.ofxName), std::string(choice.label)});
+		}
+		ParameterSpec space = ParameterSpec::menuParam(kParameterIdColorSpace, kColorSpaceParameterKey, "Color Space", std::move(options), 0);
+		space.hostFlags = HostFlag::NotAnimatable;
+		out.push_back(std::move(space));
+	}
 	if (!manifest.about.empty()) {
 		out.push_back(aboutMenuParameter(manifest.about, kParameterIdAboutMenu, kAboutMenuParameterKey));
 	}
@@ -379,6 +391,12 @@ Error lowerEffectDescriptor(const EffectManifest& manifest, const HostProfile& p
 	props.trySetString(kOfxImageEffectPropOpenCLRenderSupported, openCLRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(kOfxImageEffectPropCPURenderSupported, cap.cpuRender ? "true" : "false", &report.rejectedProperties);
 	props.trySetString(resolve::kPropNoSpatialAwareness, cap.noSpatialAwareness ? "true" : "false", &report.rejectedProperties);
+	if (cap.colorManagement && profile.capabilities.colourManagement) {
+		// The full style: the host may name any colourspace of the config. The snapshot
+		// resolves the names `ColorGamut` implements.
+		props.trySetString(kOfxImageEffectPropColourManagementStyle, kOfxImageEffectColourManagementFull, &report.rejectedProperties);
+		props.trySetString(kOfxImageEffectPropColourManagementAvailableConfigs, kOfxConfigIdentifier, &report.rejectedProperties);
+	}
 	if (overlayEntry != nullptr && manifest.property("overlay", false) && profile.capabilities.supportsOverlays) {
 		// The draw-suite interact where the host vends the suite (Resolve does: Q-RESOLVE-019's
 		// live scan), the OpenGL interact elsewhere.

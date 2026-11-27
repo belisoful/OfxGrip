@@ -70,6 +70,10 @@ public:
 	    An unavailable backend accepts nothing. */
 	bool accepts(const KernelImplementation& implementation) const noexcept override;
 	Error dispatch(const KernelDispatch& dispatch) override;
+	/*! Device memory in the current context. Its owner frees the memory, so the owner is
+	    released on the render thread while that context is current.
+	    Introduced in OfxGrip 0.5.0. */
+	Error makeScratch(const KernelImage& like, const RectI& bounds, KernelImage& out) override;
 	/*! The number of loaded modules the backend holds. */
 	std::size_t cachedModuleCount() const;
 	/*! Unloads the modules of the current context and forgets every module. A module of

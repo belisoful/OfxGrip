@@ -242,6 +242,40 @@ backend waits for the stream under the module's lock. The PTX comes from NVIDIA'
 (`scripts/ofxgrip-slang.sh --targets cuda --nvcc <path>`, or `OFXGRIP_NVCC` at configure time).
 A kernel with no PTX has no CUDA implementation, and its effect does not declare CUDA.
 
+### Color
+
+A kernel's metadata block names the space it computes in: `colorSpace: { transfer, primaries }`.
+
+- `transfer` → `linear` (the default), `gamma`, or a `ColorTransfer` name. `gamma` keeps an
+  encoded host's curve and encodes a linear host's frames with sRGB.
+- `primaries` → `host` (the default) or a `ColorPrimaries` name.
+
+The frames' colourspace reaches the render in `RenderInfo::colourspace`, an OpenFX native name,
+for an effect whose manifest sets `capabilities.colorManagement`:
+
+- The adapter declares the full colour management style where the host offers OpenFX 1.5 colour
+  management, and reads the output clip's `OfxImageClipPropColourspace`.
+- The adapter adds the Color Space menu (`ofxgrip_colorspace`, ID 9992). `Automatic` follows the
+  host. Any other choice names the colourspace, which serves a host that names none
+  (Q-RESOLVE-028).
+- `RenderSnapshot::colorSpace` resolves the name to a gamut and a transfer. A name `ColorGamut`
+  does not implement resolves to nothing, and the kernel reads the frames as they are.
+- Resolve 21.1.1 offers colour management and names an Edit-page clip `Raw`, under DaVinci YRGB
+  and under DaVinci YRGB Color Managed. A Fusion-page instance receives no name. On Resolve
+  the menu is the working source (Q-RESOLVE-028).
+
+`KernelEffect` puts the conversion into the kernel's space and back on the dispatch
+(`KernelColorPass`). `KernelEngine::run` converts each RGB or RGBA source into a 32-bit float
+scratch image, runs the kernel into a scratch destination, and converts the result into the
+host's frame. The conversion is the embedded kernel `kernels/GripColorConvert.slang`
+(`KernelColor.hpp`): decode, a 3×3 gamut matrix, encode, on unpremultiplied components when a
+curve applies. It runs on the frames' own backend, and a backend supplies the scratch images
+through `KernelBackend::makeScratch` (memory on the CPU, a pooled buffer on Metal, device memory
+on CUDA). CPU frames convert on the CPU backend whatever accelerator runs the kernel. A
+colour-managed effect declares a GPU path only where `KernelEngine::convertsColorOn` is true.
+An effect that chains kernels clears `dispatch.color` in `onPrepareDispatch` for the passes that
+read another pass's result.
+
 ## Inference (phase 4)
 
 `Inference.hpp` is the seam between an effect and the engine that runs a model: named inputs and

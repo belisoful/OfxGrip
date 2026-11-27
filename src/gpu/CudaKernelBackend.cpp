@@ -321,6 +321,40 @@ Error CudaKernelBackend::Impl::sourceTexture(Frame& frame, const Module& module,
 	return frame.texture(resource, out);
 }
 
+Error CudaKernelBackend::makeScratch(const KernelImage& like, const RectI& bounds, KernelImage& out)
+{
+	if (impl_->driver == nullptr) {
+		return Error::make(ErrorCode::MissingHostFeature, "No CUDA driver is loaded");
+	}
+	if (!like.isGpu() || like.gpu.api != GpuApi::Cuda || bounds.empty()) {
+		return Error::make(ErrorCode::InvalidParameter, "A CUDA scratch image needs a CUDA frame and bounds");
+	}
+	const CudaDriver* driver = impl_->driver;
+	const std::size_t rowBytes = static_cast<std::size_t>(bounds.width()) * 4 * sizeof(float);
+	CudaDevicePointer pointer = 0;
+	if (CudaResult r = driver->memAlloc(&pointer, rowBytes * static_cast<std::size_t>(bounds.height())); r != kCudaSuccess) {
+		return Error::make(ErrorCode::Memory, "CUDA allocated no memory for a scratch image").with("cudaResult", std::to_string(r));
+	}
+	out = KernelImage{};
+	out.connected = true;
+	out.gpu.api = GpuApi::Cuda;
+	out.gpu.device = like.gpu.device;
+	out.gpu.queue = like.gpu.queue;
+	out.gpu.handle = reinterpret_cast<void*>(static_cast<std::uintptr_t>(pointer));
+	out.gpu.desc = like.gpu.desc;
+	out.gpu.desc.bounds = bounds;
+	out.gpu.desc.regionOfDefinition = bounds;
+	out.gpu.desc.depth = BitDepth::Float;
+	out.gpu.desc.components = Components::RGBA;
+	out.gpu.rowBytes = static_cast<std::ptrdiff_t>(rowBytes);
+	out.owner = std::shared_ptr<void>(new CudaDevicePointer(pointer), [driver](void* held) {
+		auto* memory = static_cast<CudaDevicePointer*>(held);
+		driver->memFree(*memory);
+		delete memory;
+	});
+	return Error::none();
+}
+
 Error CudaKernelBackend::dispatch(const KernelDispatch& d)
 {
 	if (impl_->driver == nullptr) {
