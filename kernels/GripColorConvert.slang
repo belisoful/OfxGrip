@@ -46,21 +46,69 @@ static const float kHlgA = 0.17883277;
 static const float kHlgB = 0.28466892;
 static const float kHlgC = 0.55991073;
 
-float gripDecodeMagnitude(int transfer, float e)
+/// A power of a non-negative base. A library pow carries every special case of the function and
+/// is several times the size of this on a GPU target, and the kernel calls it per channel.
+float gripPow(float base, float exponent)
 {
-    switch (transfer)
-    {
-    case 1: return e <= 0.04045 ? e / 12.92 : pow((e + 0.055) / 1.055, 2.4);
-    case 2: return e < 0.081 ? e / 4.5 : pow((e + 0.099) / 1.099, 1.0 / 0.45);
-    case 3: return pow(e, 1.8);
-    case 4: return pow(e, 2.2);
-    case 5: return pow(e, 2.4);
-    case 6: return pow(e, 2.6);
-    default: return e;
-    }
+    return base > 0.0 ? exp(exponent * log(base)) : 0.0;
 }
 
-float gripDecode(int transfer, float encoded)
+/// A piecewise power curve: a linear segment up to `threshold`, a power above it.
+/// - Decode: e <= threshold ? e * slope : pow((e + offset) * scale, exponent).
+/// - Encode: l <= threshold ? l * slope : scale * pow(l, exponent) - offset.
+/// A pure power has a threshold below zero.
+struct GripCurve
+{
+    float threshold;
+    float slope;
+    float offset;
+    float scale;
+    float exponent;
+};
+
+GripCurve gripDecodeCurve(int transfer)
+{
+    GripCurve curve;
+    curve.threshold = -1.0;
+    curve.slope = 1.0;
+    curve.offset = 0.0;
+    curve.scale = 1.0;
+    curve.exponent = 1.0;
+    switch (transfer)
+    {
+    case 1: curve.threshold = 0.04045; curve.slope = 1.0 / 12.92; curve.offset = 0.055; curve.scale = 1.0 / 1.055; curve.exponent = 2.4; break;
+    case 2: curve.threshold = 0.081; curve.slope = 1.0 / 4.5; curve.offset = 0.099; curve.scale = 1.0 / 1.099; curve.exponent = 1.0 / 0.45; break;
+    case 3: curve.exponent = 1.8; break;
+    case 4: curve.exponent = 2.2; break;
+    case 5: curve.exponent = 2.4; break;
+    case 6: curve.exponent = 2.6; break;
+    default: break;
+    }
+    return curve;
+}
+
+GripCurve gripEncodeCurve(int transfer)
+{
+    GripCurve curve;
+    curve.threshold = -1.0;
+    curve.slope = 1.0;
+    curve.offset = 0.0;
+    curve.scale = 1.0;
+    curve.exponent = 1.0;
+    switch (transfer)
+    {
+    case 1: curve.threshold = 0.0031308; curve.slope = 12.92; curve.offset = 0.055; curve.scale = 1.055; curve.exponent = 1.0 / 2.4; break;
+    case 2: curve.threshold = 0.018; curve.slope = 4.5; curve.offset = 0.099; curve.scale = 1.099; curve.exponent = 0.45; break;
+    case 3: curve.exponent = 1.0 / 1.8; break;
+    case 4: curve.exponent = 1.0 / 2.2; break;
+    case 5: curve.exponent = 1.0 / 2.4; break;
+    case 6: curve.exponent = 1.0 / 2.6; break;
+    default: break;
+    }
+    return curve;
+}
+
+float gripDecode(int transfer, GripCurve curve, float encoded)
 {
     if (transfer == 0)
     {
@@ -68,32 +116,20 @@ float gripDecode(int transfer, float encoded)
     }
     if (transfer == 7)
     {
-        float p = pow(clamp(encoded, 0.0, 1.0), 1.0 / kPqM2);
-        return pow(max(p - kPqC1, 0.0) / (kPqC2 - kPqC3 * p), 1.0 / kPqM1);
+        float p = gripPow(clamp(encoded, 0.0, 1.0), 1.0 / kPqM2);
+        return gripPow(max(p - kPqC1, 0.0) / (kPqC2 - kPqC3 * p), 1.0 / kPqM1);
     }
     if (transfer == 8)
     {
         float e = clamp(encoded, 0.0, 1.0);
         return e <= 0.5 ? e * e / 3.0 : (exp((e - kHlgC) / kHlgA) + kHlgB) / 12.0;
     }
-    return encoded < 0.0 ? -gripDecodeMagnitude(transfer, -encoded) : gripDecodeMagnitude(transfer, encoded);
+    float magnitude = abs(encoded);
+    float linear = magnitude <= curve.threshold ? magnitude * curve.slope : gripPow((magnitude + curve.offset) * curve.scale, curve.exponent);
+    return encoded < 0.0 ? -linear : linear;
 }
 
-float gripEncodeMagnitude(int transfer, float l)
-{
-    switch (transfer)
-    {
-    case 1: return l <= 0.0031308 ? l * 12.92 : 1.055 * pow(l, 1.0 / 2.4) - 0.055;
-    case 2: return l < 0.018 ? l * 4.5 : 1.099 * pow(l, 0.45) - 0.099;
-    case 3: return pow(l, 1.0 / 1.8);
-    case 4: return pow(l, 1.0 / 2.2);
-    case 5: return pow(l, 1.0 / 2.4);
-    case 6: return pow(l, 1.0 / 2.6);
-    default: return l;
-    }
-}
-
-float gripEncode(int transfer, float linear)
+float gripEncode(int transfer, GripCurve curve, float linear)
 {
     if (transfer == 0)
     {
@@ -101,15 +137,17 @@ float gripEncode(int transfer, float linear)
     }
     if (transfer == 7)
     {
-        float p = pow(clamp(linear, 0.0, 1.0), kPqM1);
-        return pow((kPqC1 + kPqC2 * p) / (1.0 + kPqC3 * p), kPqM2);
+        float p = gripPow(clamp(linear, 0.0, 1.0), kPqM1);
+        return gripPow((kPqC1 + kPqC2 * p) / (1.0 + kPqC3 * p), kPqM2);
     }
     if (transfer == 8)
     {
         float l = clamp(linear, 0.0, 1.0);
         return l <= 1.0 / 12.0 ? sqrt(3.0 * l) : kHlgA * log(12.0 * l - kHlgB) + kHlgC;
     }
-    return linear < 0.0 ? -gripEncodeMagnitude(transfer, -linear) : gripEncodeMagnitude(transfer, linear);
+    float magnitude = abs(linear);
+    float encoded = magnitude <= curve.threshold ? magnitude * curve.slope : curve.scale * gripPow(magnitude, curve.exponent) - curve.offset;
+    return linear < 0.0 ? -encoded : encoded;
 }
 
 [shader("compute")]
@@ -127,9 +165,11 @@ void gripColorConvert(uint3 tid : SV_DispatchThreadID)
     bool curved = uniforms.decode != 0 || uniforms.encode != 0;
     bool unpremultiply = curved && uniforms.premultiplied != 0 && color.a > 0.0;
     float3 rgb = unpremultiply ? color.rgb / color.a : color.rgb;
-    rgb = float3(gripDecode(uniforms.decode, rgb.r), gripDecode(uniforms.decode, rgb.g), gripDecode(uniforms.decode, rgb.b));
+    GripCurve decode = gripDecodeCurve(uniforms.decode);
+    GripCurve encode = gripEncodeCurve(uniforms.encode);
+    rgb = float3(gripDecode(uniforms.decode, decode, rgb.r), gripDecode(uniforms.decode, decode, rgb.g), gripDecode(uniforms.decode, decode, rgb.b));
     rgb = float3(dot(uniforms.row0, rgb), dot(uniforms.row1, rgb), dot(uniforms.row2, rgb));
-    rgb = float3(gripEncode(uniforms.encode, rgb.r), gripEncode(uniforms.encode, rgb.g), gripEncode(uniforms.encode, rgb.b));
+    rgb = float3(gripEncode(uniforms.encode, encode, rgb.r), gripEncode(uniforms.encode, encode, rgb.g), gripEncode(uniforms.encode, encode, rgb.b));
     if (unpremultiply)
     {
         rgb *= color.a;
